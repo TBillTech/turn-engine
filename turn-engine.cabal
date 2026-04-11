@@ -1,0 +1,65 @@
+cabal-version:      3.4
+name:               turn-engine
+version:            0.1.0.0
+synopsis:
+    Backbone logic for computing GameState, legal moves, and VisibleGameState
+    per player.
+description:
+    Also contains trainers for AI players.
+license:            MIT
+license-file:       LICENSE
+author:             TBillTech
+maintainer:         TBillTech
+category:           Game
+build-type:         Simple
+extra-doc-files:    README.md
+
+-- A shared stanza imported by every component.
+common common-options
+    build-depends:
+        base,
+        relude
+    mixins:
+        base hiding (Prelude),
+        relude (Relude as Prelude),
+        relude
+    default-language:   GHC2024
+    default-extensions:
+        OverloadedStrings
+        DeriveGeneric
+        DeriveAnyClass
+        LambdaCase
+        OverloadedRecordDot
+        NoFieldSelectors
+    ghc-options: -Wall
+
+library
+    import:           common-options
+    hs-source-dirs:   src
+    exposed-modules:
+        Lib
+        Game.Logic
+        Game.Types
+    build-depends:
+        microlens-platform,
+        aeson >= 2.2
+
+executable turn-engine
+    import:           common-options
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:
+        turn-engine
+
+test-suite turn-engine-test
+    import:           common-options
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:    LibSpec
+    hs-source-dirs:   test
+    build-depends:
+        turn-engine,
+        hspec,
+        hspec-discover,
+        QuickCheck
+    build-tool-depends: hspec-discover:hspec-discover

@@ -1,0 +1,12 @@
+packages: .
+
+-- GHC 9.14 ships boot libraries with versions newer than many packages
+-- currently declare upper bounds for.  Relax those specific bounds so Cabal
+-- can build a consistent plan on this cutting-edge compiler.
+allow-newer:
+  *:base,
+  *:template-haskell,
+  *:ghc-prim,
+  *:bytestring,
+  *:deepseq,
+  *:time
