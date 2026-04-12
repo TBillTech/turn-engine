@@ -13,6 +13,7 @@ maintainer:         TBillTech
 category:           Game
 build-type:         Simple
 extra-doc-files:    README.md
+                    SETUP_GUIDE.md
 
 -- A shared stanza imported by every component.
 common common-options
