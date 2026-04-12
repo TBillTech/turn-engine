@@ -32,6 +32,7 @@ common common-options
         LambdaCase
         OverloadedRecordDot
         NoFieldSelectors
+        DuplicateRecordFields
     ghc-options: -Wall
 
 library
@@ -41,6 +42,12 @@ library
         Lib
         Game.Logic
         Game.Types
+        Game.Core.Primitives
+        Game.Core.Types
+        Game.CursedTreasure.Types
+        Game.FogOfBattle.Types
+        Game.ArtOfWar.Types
+        Game.RealEstate.Types
     build-depends:
         microlens-platform,
         aeson >= 2.2

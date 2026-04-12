@@ -1,9 +1,3 @@
-module Game.Types where
+module Game.Types (module Game.Core.Types) where
 
-import Data.Aeson (FromJSON, ToJSON)
-
--- | Represents the overall state of a game in progress.
-data GameState = GameState
-    { players :: [Text]
-    , turn    :: Int
-    } deriving (Show, Eq, Generic, FromJSON, ToJSON)
+import Game.Core.Types
