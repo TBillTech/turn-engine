@@ -1,8 +1,9 @@
 packages: .
 
--- GHC 9.14 ships boot libraries with versions newer than many packages
--- currently declare upper bounds for.  Relax those specific bounds so Cabal
--- can build a consistent plan on this cutting-edge compiler.
+-- This repo recommends GHC 9.12.2 (see SETUP_GUIDE.md, and the default
+-- `cabal.project.local` pin). If you experiment with newer GHC versions,
+-- boot library versions can outpace some packages' declared upper bounds.
+-- Relax those specific bounds so Cabal can still find a consistent plan.
 allow-newer:
   *:base,
   *:template-haskell,

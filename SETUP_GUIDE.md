@@ -6,13 +6,9 @@ This repo is a standard Cabal project with:
 - an executable (`app/`)
 - an Hspec test suite using `hspec-discover` (`test/`)
 
-The project uses `default-language: GHC2024` in its Cabal file, so you need a GHC that supports the GHC2024 language edition (**GHC >= 9.10**).
+For the smoothest VS Code experience (HLS on Windows in particular), this repo recommends:
 
-You also need a recent enough `cabal-install` that understands the `GHC2024` language edition (in practice, **cabal-install >= 3.16** is a safe baseline).
-
-If you attempt to build with an older compiler (for example GHC 9.6.x), Cabal will fail with an error like:
-
-> conflict: requires GHC2024 which is not supported
+- GHC: **9.12.2**
 
 ## Install the Haskell toolchain (GHC + Cabal + HLS)
 
@@ -26,10 +22,13 @@ GHCup can install and manage:
 - **Cabal** (the build tool used by this repo)
 - **HLS** (Haskell Language Server, for editor features)
 
-Minimum versions for this repo:
+Recommended versions for this repo:
 
-- GHC: **9.10 or newer** (for `GHC2024`)
-- cabal-install: **3.16 or newer** (so `GHC2024` is understood)
+- GHC: **9.12.2**
+
+Recommended version (to align with readily-available HLS binaries on Windows):
+
+- GHC: **9.12.2**
 
 ### Windows (recommended)
 
@@ -44,26 +43,31 @@ Minimum versions for this repo:
    - `ghc --version`
    - `cabal --version`
 
-7. Ensure you have a compatible compiler installed via GHCup (GHC **9.10+**).
+7. Ensure you have the recommended compiler installed via GHCup (GHC **9.12.2**).
 
-   If `ghc --version` shows an older version, install and select a newer GHC (choose a version that GHCup offers that is >= 9.10):
+  If `ghc --version` shows a different version, install and select the recommended GHC:
 
-   - `ghcup list -t ghc`
-   - `ghcup install ghc 9.10.1` (example)
-   - `ghcup set ghc 9.10.1` (example)
+    - `ghcup list -t ghc`
+    - `ghcup install ghc 9.12.2` (recommended)
+    - `ghcup set ghc 9.12.2` (recommended)
 
    Then re-check:
 
-   - `ghc --version`
+    - `ghc --version`
+
+   This repo also supports pinning the compiler on a per-checkout basis via `cabal.project.local` (which is gitignored). The workspace includes a default `cabal.project.local` that pins:
+
+    - `with-compiler: ghc-9.12.2`
+
 8. Install HLS via GHCup (optional but recommended for VS Code):
 
-   - `ghcup install hls`
+    - `ghcup install hls`
 
-9. Ensure Cabal itself is new enough (cabal-install **3.16+**). For example:
+9. Ensure Cabal itself is installed and reasonably recent. For example:
 
-  - `ghcup install cabal 3.16.1.0` (example)
-  - `ghcup set cabal 3.16.1.0` (example)
-  - `cabal --version`
+    - `ghcup install cabal 3.16.1.0` (example)
+    - `ghcup set cabal 3.16.1.0` (example)
+    - `cabal --version`
 
 If `cabal` (or `ghc`) is “not recognized”, it’s almost always one of:
 
@@ -151,7 +155,7 @@ After you’ve installed the toolchain via the steps in “Install the Haskell t
 
 If you hit dependency solver issues:
 
-- Double-check your GHC version is new enough for `GHC2024`.
+- Double-check your GHC version matches the repo recommendation (GHC **9.12.2**).
 - This repo’s `cabal.project` includes an `allow-newer` section intended to help on newer compilers by relaxing some boot library bounds. If you intentionally use an older/stable compiler, you may be able to remove those relaxations (or put overrides in a local `cabal.project.local`)—but prefer staying on a compatible GHC.
 
 ## VS Code recommendations

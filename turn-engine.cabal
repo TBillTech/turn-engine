@@ -24,7 +24,7 @@ common common-options
         base hiding (Prelude),
         relude (Relude as Prelude),
         relude
-    default-language:   GHC2024
+    default-language:   GHC2021
     default-extensions:
         OverloadedStrings
         DeriveGeneric
