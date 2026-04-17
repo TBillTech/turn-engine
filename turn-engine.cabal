@@ -44,11 +44,13 @@ library
         Game.Types
         Game.Core.Primitives
         Game.Core.Types
+        Game.CursedTreasure.API
         Game.CursedTreasure.Types
         Game.FogOfBattle.Types
         Game.ArtOfWar.Types
         Game.RealEstate.Types
     build-depends:
+        random ^>=1.3.1,
         microlens-platform,
         aeson >= 2.2
 
@@ -64,6 +66,7 @@ test-suite turn-engine-test
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     other-modules:    LibSpec
+                    , Game.CursedTreasure.APISpec
     hs-source-dirs:   test
     build-depends:
         turn-engine,
