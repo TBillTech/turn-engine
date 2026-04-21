@@ -120,7 +120,7 @@ data TerrainToken
     | Statue HourHand
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
-data TerrainHex = TerrainHex Feature [TerrainToken]
+data TerrainHex = TerrainHex Bool Feature [TerrainToken]
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 type ClueBoard = TokenSpace (PlayerId, ClueCard)

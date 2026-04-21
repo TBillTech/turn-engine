@@ -21,6 +21,7 @@ import Game.CursedTreasure.Types
     ( CensoredGameState (..)
     , ClueCard (..)
     , ClueObject (..)
+    , ClueColor (..)
     , Feature (..)
     , GameState (..)
     , PlayerDescription (..)
@@ -44,11 +45,12 @@ import Game.CursedTreasure.Types
 import Game.Core.Primitives
     ( TokenSpace (..)
     , HourHand (..)
-    , AdjacencyPolicy (HorizontalHexAdjacency)
+    , AdjacencyPolicy (..)
     , TokenSpaceIndex (..)
     , adjacentIndices
     , isAdjacentIndex
     , policyFourSquareDistance)
+import GHC.IOArray (boundsIOArray)
 
 getAllPlayerColors :: [PlayerDescription]
 getAllPlayerColors = zipWith mkPlayerDescription [1 ..] allPlayerColors
@@ -160,30 +162,35 @@ stackTreasure g = (twelve ++ bottom, g'')
 
 type HexMap = Map TokenSpaceIndex TerrainHex
 
+distanceSet :: Int -> Set TokenSpaceIndex -> Set TokenSpaceIndex
+distanceSet dist existingIndexes = Set.unions $ getDistanceSets dist [existingIndexes]
+    where
+        getDistanceSets 0 sets = sets
+        getDistanceSets _ [] = []
+        getDistanceSets reps (lastSet:rest) = getDistanceSets (reps-1) $ nextSet:lastSet:rest
+            where   nextSet = getBoundarySet (const True) lastSet
+
+
 addToken :: RandomGen g => Int -> TerrainToken -> (HexMap, g) -> (HexMap, g)
 addToken dist t (b, g) | null consideredSet = addToken (dist-1) t (b, g')
                        | otherwise = (alter addIt candidateI b, g')
     where   (i, g') = uniformR (0, length consideredSet -1) g
             candidateI = Set.elemAt i consideredSet
             possibleB = Map.filter possible b
-            consideredSet = (fromList . keys $ possibleB) `Set.difference` distanceSet
-            distanceSet = Set.unions $ getDistanceSets dist [existingIndexes]
-            getDistanceSets 0 sets = sets
-            getDistanceSets _ [] = []
-            getDistanceSets reps (lastSet:rest) = getDistanceSets (reps-1) $ nextSet:lastSet:rest
-                where   nextSet = getBoundarySet (const True) lastSet
-            existingIndexes = fromList . keys $ Map.filter hasToken b
-            hasToken (TerrainHex _ ts) = toZeroStatue t `elem` map toZeroStatue ts
+            consideredSet = (fromList . keys $ possibleB) `Set.difference` distSet
+            distSet = distanceSet dist existingIndexes
+            existingIndexes = fromList . keys $ Map.filter hasT b
+            hasT (TerrainHex _ _ ts) = toZeroStatue t `elem` map toZeroStatue ts
             toZeroStatue (Statue _) = Statue $ HourHand 0
             toZeroStatue th = th
-            possible (TerrainHex f ts)  | (not . null) ts = False
-                                        | f == Ocean = False
-                                        | f == Lagoon = False
-                                        | f == Mountain = False
-                                        | t == PalmTree && f == Jungle = False
-                                        | otherwise = True
-            addIt (Just (TerrainHex f ts)) = Just $ TerrainHex f $ t:ts
-            addIt Nothing = Just $ TerrainHex Meadow [t]
+            possible (TerrainHex _ f ts)  | (not . null) ts = False
+                                          | f == Ocean = False
+                                          | f == Lagoon = False
+                                          | f == Mountain = False
+                                          | t == PalmTree && f == Jungle = False
+                                          | otherwise = True
+            addIt (Just (TerrainHex isL f ts)) = Just $ TerrainHex isL f $ t:ts
+            addIt Nothing = Just $ TerrainHex False Meadow [t]
 
 addTokens :: RandomGen g => Int -> TerrainToken -> (HexMap, g) -> (HexMap, g)
 addTokens 0 _ bG = bG
@@ -193,21 +200,21 @@ getBoundarySet :: (TokenSpaceIndex -> Bool) -> Set TokenSpaceIndex -> Set TokenS
 getBoundarySet filt ts = Set.filter filt $ superKeys `Set.difference` ts
     where superKeys = fromList $ concatMap (adjacentIndices HorizontalHexAdjacency) ts
 
-getBoundary :: ((TokenSpaceIndex, TerrainHex) -> Bool) -> HexMap -> Set TokenSpaceIndex
+getBoundary :: (TokenSpaceIndex -> TerrainHex -> Bool) -> HexMap -> Set TokenSpaceIndex
 getBoundary filt m = getBoundarySet setFilter keySet
     where setFilter t = t `notMember` m
-          keySet = fromList $ map fst (filter filt $ toPairs m)
+          keySet = fromList $ map fst (filter (uncurry filt) $ toPairs m)
 
-isNonOceanTerrain :: (TokenSpaceIndex, TerrainHex) -> Bool
-isNonOceanTerrain (_, TerrainHex Ocean _) = False
-isNonOceanTerrain _ = True
+isNonOceanTerrain :: TokenSpaceIndex -> TerrainHex -> Bool
+isNonOceanTerrain _ (TerrainHex _ Ocean _) = False
+isNonOceanTerrain _ _ = True
 
 fillHexOcean :: RandomGen g => (HexMap, g) -> (HexMap, g)
 fillHexOcean (m, g) = (Map.union withFirst secondMap, g)
     where firstBoundary = getBoundary isNonOceanTerrain m
-          withFirst = foldr (\k m' -> insert k (TerrainHex Ocean []) m') m firstBoundary
-          secondBoundary = toList $ getBoundary (const True) withFirst
-          secondMap = fromList $ map (, TerrainHex Ocean []) secondBoundary
+          withFirst = foldr (\k m' -> insert k (TerrainHex True Ocean []) m') m firstBoundary
+          secondBoundary = toList $ getBoundary (const . const True) withFirst
+          secondMap = fromList $ map (, TerrainHex True Ocean []) secondBoundary
 
 splitNeighbors :: Set TokenSpaceIndex -> [TokenSpaceIndex] -> Set TokenSpaceIndex
     -> (Set TokenSpaceIndex, [TokenSpaceIndex], Set TokenSpaceIndex)
@@ -235,7 +242,7 @@ getSimplyConnectedSets m | null m = []
 
 getFeatureConnectedSets :: HexMap -> Feature -> (Feature, [HexMap])
 getFeatureConnectedSets m f = (f, sortedMaps)
-    where unsortedMaps = getSimplyConnectedSets $ Map.filter (\(TerrainHex f' _) -> f' == f) m
+    where unsortedMaps = getSimplyConnectedSets $ Map.filter (\(TerrainHex _ f' _) -> f' == f) m
           sortedMaps = sortBy (\m1 m2 -> length m2 `compare` length m1) unsortedMaps
 
 getConnectedSets :: HexMap -> [(Feature, [HexMap])]
@@ -260,7 +267,7 @@ fillInTerrain (m, g) | contiguous = (True, (m, g))
           isOcean = maybe False ((== Ocean) . fst) mOcean
           oceans = maybe [Map.empty] snd mOcean
           isolated = map (convertToLagoon <$>) $ drop 1 oceans
-          convertToLagoon (TerrainHex _ ts) = TerrainHex Lagoon ts
+          convertToLagoon (TerrainHex isL _ ts) = TerrainHex isL Lagoon ts
           toLagoon [] m' = m'
           toLagoon (iso:isos) m' = toLagoon isos $ Map.union iso m'
 
@@ -273,7 +280,7 @@ addTerrainSeeds count tHex (m, g) = (fst seedsG, first (Map.union m) mapG)
             shuffledG = uniformShuffleList (toList available) g
             mapG = first (fromList . map (, tHex)) seedsG
             seedsG  | length (fst shuffledG) < count = first initialize shuffledG
-                    | tHex == TerrainHex River [] = sift $ first riverFilter shuffledG
+                    | tHex == TerrainHex False River [] = sift $ first riverFilter shuffledG
                     | otherwise = sift $ first adjFilter shuffledG
             initialize :: [TokenSpaceIndex] -> [TokenSpaceIndex]
             initialize sds  | length sds >= count = take count sds
@@ -339,7 +346,7 @@ growTerrainSeed RiverGrowth tHex (i, territory) mapG
             (rI, g') = uniformR (0, length territoryBound - 1) $ snd mapG
             toAdd = Set.elemAt rI territoryBound
             territory' = Set.insert toAdd territory
-            usedTHex    | i == 0 = TerrainHex Ocean []
+            usedTHex    | i == 0 = TerrainHex True Ocean []
                         | otherwise = tHex
             mapG' = (insert toAdd usedTHex $ fst mapG, g')
 growTerrainSeed CoastalGrowth _ (-1, _) mapG = mapG
@@ -354,28 +361,41 @@ growTerrainSeed CoastalGrowth tHex (i, territory) mapG
             (rI, g') = uniformR (0, length territoryBound - 1) $ snd mapG
             toAdd = Set.elemAt rI territoryBound
             territory' = Set.insert toAdd territory
-            usedTHex    | i == 0 = TerrainHex Ocean []
+            usedTHex    | i == 0 = TerrainHex True Ocean []
                         | otherwise = tHex
             mapG' = (insert toAdd usedTHex $ fst mapG, g')
 
 createBoard :: RandomGen g => g -> HexBoard
 createBoard g | failed = createBoard $ snd filledTerrainBoardG
               | otherwise = TokenSpace { adjacency = HorizontalHexAdjacency
-                                       , tokens = fst fullBoardG}
-    where fullBoardG = addTokens 3 PalmTree hutBoardG
-          hutBoardG = addTokens 4 Hut allStatueBoardG
-          allStatueBoardG = addToken 4 (Statue $ HourHand 1) twoStatueBoardG
-          twoStatueBoardG = addToken 4 (Statue $ HourHand 5) oneStatueBoardG
-          oneStatueBoardG = addToken 4 (Statue $ HourHand 9) allTerrainBoardG
-          (failed, filledTerrainBoardG) = fillInTerrain allTerrainBoardG
-          allTerrainBoardG = fillHexOcean beachTerrainBoardG
-          beachTerrainBoardG = growTerrainSeeds (CoastalGrowth, [6,5,4,3]) (TerrainHex Beach []) meadowTerrainBoardG
-          meadowTerrainBoardG = growTerrainSeeds (RandomGrowth, [10,6,4]) (TerrainHex Meadow []) jungleTerrainBoardG
-          jungleTerrainBoardG = growTerrainSeeds (RandomGrowth, [16,10,6]) (TerrainHex Jungle []) mountainTerrainBoardG
-          mountainTerrainBoardG = growTerrainSeeds (RandomGrowth, [12,8,6]) (TerrainHex Mountain []) riverTerrainBoardG
-          riverTerrainBoardG = growTerrainSeeds (RiverGrowth, [5,3,3]) (TerrainHex River []) lagoonTerrainBoardG
-          lagoonTerrainBoardG = growTerrainSeeds (RandomGrowth, [10,6,4]) (TerrainHex Lagoon []) emptyHexMapG
-          emptyHexMapG = (Map.empty :: HexMap, g)
+                                       , tokens = setLargest connectedSets fullBoard}
+    where   connectedSets = getConnectedSets fullBoard
+            setLargest [] board = board
+            setLargest ((_, []):rest) board = setLargest rest board
+            setLargest ((_, large:_):rest) board = setLargest rest $
+                foldr (alter toLargest) board (keys large)
+            toLargest (Just (TerrainHex _ f ts)) = Just (TerrainHex True f ts)
+            toLargest _ = Nothing
+            fullBoard = fst $ addTokens 3 PalmTree hutBoardG
+            hutBoardG = addTokens 4 Hut allStatueBoardG
+            allStatueBoardG = addToken 4 (Statue $ HourHand 1) twoStatueBoardG
+            twoStatueBoardG = addToken 4 (Statue $ HourHand 5) oneStatueBoardG
+            oneStatueBoardG = addToken 4 (Statue $ HourHand 9) filledTerrainBoardG
+            (failed, filledTerrainBoardG) = fillInTerrain allTerrainBoardG
+            allTerrainBoardG = fillHexOcean beachTerrainBoardG
+            beachTerrainBoardG = growTerrainSeeds
+                (CoastalGrowth, [6,5,4,3]) (TerrainHex False Beach []) meadowTerrainBoardG
+            meadowTerrainBoardG = growTerrainSeeds
+                (RandomGrowth, [10,6,4]) (TerrainHex False Meadow []) jungleTerrainBoardG
+            jungleTerrainBoardG = growTerrainSeeds
+                (RandomGrowth, [16,10,6]) (TerrainHex False Jungle []) mountainTerrainBoardG
+            mountainTerrainBoardG = growTerrainSeeds
+                (RandomGrowth, [12,8,6]) (TerrainHex False Mountain []) riverTerrainBoardG
+            riverTerrainBoardG = growTerrainSeeds
+                (RiverGrowth, [5,3,3]) (TerrainHex False River []) lagoonTerrainBoardG
+            lagoonTerrainBoardG = growTerrainSeeds
+                (RandomGrowth, [10,6,4]) (TerrainHex False Lagoon []) emptyHexMapG
+            emptyHexMapG = (Map.empty :: HexMap, g)
 
 
 createNewGameState :: [PlayerDescription] -> Int -> GameState
@@ -391,7 +411,7 @@ createNewGameState playerDs randomSeed
                 , clueDeck = (randomizedClues, [])
                 , treasureDeck = (stackedTreasure, [])
                 , terrainBoard = board
-                , treasureBoards = []
+                , treasureBoards = newTreasureBoard <$> take 4 allClueColors
                 , raisingTreasure = Nothing
                 , latestMessage = "Player " <> show firstPlayerName <> " Turn"
                 , gameOver = False
@@ -405,7 +425,7 @@ createNewGameState playerDs randomSeed
             (randomizedClues, gT) = uniformShuffleList allClues g
             (stackedTreasure, gB) = stackTreasure gT
             board = createBoard gB
-            startCards = if length playerDs == 2 then 6 else 4
+            startCards = if length playerDs == 2 then 6::Int else 4
             dealClues s = dealStartClues (map (.player) s.players) s
             dealStartClues [] s = s
             dealStartClues (pd:restPlayers) s = dealStartClues restPlayers $
@@ -416,6 +436,9 @@ createNewGameState playerDs randomSeed
                 where (eUpd, deckUpd, psUpd) = getUpds $ dealClueCardToPlayer s.clueDeck (findPlayer pId s)
                       getUpds (Left e) = ((e <>), id, id)
                       getUpds (Right (dUpd, pUpd)) = (id, dUpd, pUpd)
+
+newTreasureBoard :: ClueColor -> TreasureBoard
+newTreasureBoard c = (c, TokenSpace { adjacency = IndexAdjacency, tokens = Map.empty })
 
 nextTurn :: GameState -> GameState
 nextTurn gameState = assignPlayer mCurrentPlayer . setNotActive $ gameState
@@ -535,7 +558,7 @@ mFindLocationList :: (TokenSpaceIndex -> TerrainHex -> Bool) -> Map TokenSpaceIn
 mFindLocationList filt board = nonEmpty . toPairs $ findLocations filt board
 
 hasToken :: TerrainToken -> TokenSpaceIndex -> TerrainHex -> Bool
-hasToken t _ (TerrainHex _ ts) = t `elem` ts
+hasToken t _ (TerrainHex _ _ ts) = t `elem` ts
 
 findFirstToken :: TerrainToken -> Map TokenSpaceIndex TerrainHex -> Maybe (TokenSpaceIndex, TerrainHex)
 findFirstToken t = (head <$>) . mFindLocationList (hasToken t)
@@ -545,7 +568,7 @@ raiseTreasureCase player gS (GameModeNominal, moves) =
     (GameModeNominal, (RaiseTreasure <$> validColors) ++ moves)
     where   validColors = mapMaybe mColor $ filter exactlyOne possibleColorTokens
             jeepHex = findFirstToken (PlayerJeep player.player.playerId) gS.terrainBoard.tokens
-            tokenList = maybe [] (\(_, TerrainHex _ ts) -> ts) jeepHex
+            tokenList = maybe [] (\(_, TerrainHex _ _ ts) -> ts) jeepHex
             possibleColorTokens = filter (isJust . mColor) tokenList
             mColor (ClueToken t) = Just t
             mColor _ = Nothing
@@ -555,8 +578,8 @@ raiseTreasureCase _ _ gMoves = gMoves
 pickupAmuletCase :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
 pickupAmuletCase player gS (GameModeNominal, moves) = (GameModeNominal, possibleAmulet moves)
     where   jeepHex = findFirstToken (PlayerJeep player.player.playerId) gS.terrainBoard.tokens
-            tokenList = maybe [] (\(_, TerrainHex _ ts) -> ts) jeepHex
-            possibleAmulet | Amulet `elem` tokenList = (PickupAmulet:)
+            tokenList = maybe [] (\(_, TerrainHex _ _ ts) -> ts) jeepHex
+            possibleAmulet | player.availablePickupAmulet > 0 && Amulet `elem` tokenList = (PickupAmulet:)
                            | otherwise = id
 pickupAmuletCase _ _ gMoves = gMoves
 
@@ -583,11 +606,61 @@ useAmuletCase player gS (GameModeNominal, moves) | player.amulets == 0 = (GameMo
             locToTuple _ = Nothing
 useAmuletCase _ _ gMoves = gMoves
 
+matchObject :: ClueObject -> TokenSpaceIndex -> TerrainHex -> Bool
+matchObject (FeatureClue True clueF) _ (TerrainHex isL tF _) = isL && clueF == tF
+matchObject (FeatureClue _ clueF) _ (TerrainHex _ tF _) = clueF == tF
+matchObject (TokenClue clueT) _ (TerrainHex _ _ ts) = clueT `elem` ts
+matchObject StatueClue _ (TerrainHex _ _ ts) = StatueClue `elem` mapMaybe toStatueClue ts
+    where   toStatueClue (Statue _) = Just StatueClue
+            toStatueClue _ = Nothing
+
+matchClueCard :: HexMap -> ClueCard -> TokenSpaceIndex -> TerrainHex -> Bool
+matchClueCard _ HiddenClue _ _ = False
+matchClueCard board (WithinStepsOf n obj) k v
+    = matchClueCard board (IsNotOn obj) k v && (not . null) (findLocations isObj bounds)
+    where   isObj = matchObject obj
+            bounds = Map.restrictKeys board boundSet
+            boundSet = distanceSet n (one k) `Set.difference` one k
+matchClueCard board (NotWithinStepsOf n obj) k _ = null (findLocations isObj bounds)
+    where   isObj = matchObject obj
+            bounds = Map.restrictKeys board boundSet
+            boundSet = distanceSet n (one k) `Set.difference` one k
+matchClueCard _ (IsOn obj) k v = matchObject obj k v
+matchClueCard _ (IsNotOn obj) k v = not (matchObject obj k v)
+
+applyClue :: HexMap -> (ClueColor, ClueCard) -> (HexMap, HexMap)
+applyClue board (color, card) = (beforeMarkers, afterMarkers)
+    where   currentMarkers = findLocations (hasToken $ ClueToken color) board
+            beforeMarkers   | null currentMarkers = findLocations isNonOceanTerrain board
+                            | otherwise = currentMarkers
+            afterMarkers = findLocations (matchCard card) beforeMarkers
+            matchCard = matchClueCard board
+
 enumeratePossibleCluePlays :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
-enumeratePossibleCluePlays player gS (mode, moves) = undefined
+enumeratePossibleCluePlays player gS (GameModeNominal, moves) = (GameModeNominal, allOptions ++ moves)
+    where   allOptions = concatMap (map toM . filter possible . zip (take 4 allClueColors) . repeat) player.clues
+            toM (color, card) = PlayClue color card
+            possible cCard = let (before, after) = applyClue gS.terrainBoard.tokens cCard in
+                length before > length after && not (null after)
+enumeratePossibleCluePlays _ _ gMoves = gMoves
 
 enumeratePossibleJeepMoves :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
-enumeratePossibleJeepMoves player gS (mode, moves) = undefined
+enumeratePossibleJeepMoves player gS (GameModeNominal, moves) 
+    | player.availableJeepMoves == 0 = (GameModeNominal, moves)
+    | null oneLeg = (GameModeMustMoveJeep, mapMaybe toMove unconstrained)
+    | otherwise = (GameModeNominal, mapMaybe toMove oneLeg)
+    where   connectedSets = concatMap snd (filter ((Ocean /=) . fst) $ getConnectedSets gS.terrainBoard.tokens)
+            jeepHex = findFirstToken (PlayerJeep player.player.playerId) gS.terrainBoard.tokens
+            oneLeg = case jeepHex of (Just (k, _)) -> toList $ legSet k
+                                     Nothing -> []
+            legSet k = Set.unions $ distanceSet 1 (one k):
+                map (fromList . keys) (filter (member k) connectedSets)
+            unconstrained = map fst $ filter ((\(TerrainHex _ f _) -> f /= Ocean) . snd) $ 
+                toPairs gS.terrainBoard.tokens
+            toMove (TokenSpace2DIndex i j) = Just $ MoveJeep i j
+            toMove _ = Nothing
+enumeratePossibleJeepMoves _ _ gMoves = gMoves
+
 
 enumeratePlayerOptions :: PlayerState -> GameState -> (GameMode, [PlayerMove])
 enumeratePlayerOptions player gS = foldr ($) (GameModeNominal, []) enumerators
