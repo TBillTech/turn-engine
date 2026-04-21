@@ -47,6 +47,9 @@ mkClueColor c | c `elem` colorList = Just (ClueColor c)
               | otherwise = Nothing
     where colorList = [White, Black, DarkOrange, LightBlue, LightRed, LightGreen]
 
+allClueColors :: [ClueColor]
+allClueColors = mapMaybe mkClueColor allGameColors
+
 mkOtherColor ::  GameColor -> Maybe OtherColor
 mkOtherColor c | c `elem` colorList = Just (OtherColor c)
                | otherwise = Nothing
@@ -110,7 +113,7 @@ data PlayerState = PlayerState
 
 data TerrainToken 
     = PlayerJeep PlayerId 
-    | ClueToken GameColor 
+    | ClueToken ClueColor 
     | Amulet
     | Hut
     | PalmTree
@@ -161,23 +164,32 @@ instance ToGameState CensoredGameState where
     toGameState (CensoredGameState g) = g
 
 data RaisingTreasureState = RaisingTreasureState
-    { treasureChest :: [TreasureCard]
-    , takeOrder :: [PlayerId]
-    , takeIndex :: Int
+    { rtTreasureChest :: Deck TreasureCard
+    , rtOrder :: [PlayerId]
+    , rtPlayerIndex :: Int
+    , rtViewing :: [PlayerId]
     } 
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 -- | Player Move for Cursed Treasure game.
-data PlayerMove = PassTurn
-    | PlayClue (Maybe ClueColor) ClueCard
-    | MoveJeep (Int, Int)
+data PlayerMove = PlayerMoveError Text
+    | PassTurn
+    | PlayClue ClueColor ClueCard
+    | MoveJeep Int Int
     | ExchangeClueCards
-    | UseAmuletMove
+    | PickupAmulet
+    | UseAmuletIncrMove
+    | UseAmuletPlayClue ClueColor ClueCard 
     | UseAmuletExchangeCards
-    | UseAmuletPlayClue
-    | UseAmuletRemoveSiteMarker (Int, Int)
-    | RaiseTreasure
+    | UseAmuletRemoveSiteMarker ClueColor Int Int
+    | RaiseTreasure ClueColor
     | RaisingTreasurePass
     | RaisingTreasureTake
     | RaisingTreasureWardCurse
     | RaisingTreasureAcceptCurse
+
+data GameMode = GameModeNominal
+    | GameModeError Text
+    | GameModeMustMoveJeep
+    | GameModeRaisingTreasureView RaisingTreasureState
+    | GameModeRaisingTreasureChoice RaisingTreasureState

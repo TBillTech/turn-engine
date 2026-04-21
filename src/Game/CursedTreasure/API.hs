@@ -12,7 +12,7 @@ import Relude.Extra (bimapF, maximum1)
 import Relude.Extra.Map (insert, keys, member, notMember, toPairs, alter)
 import System.Random (mkStdGen, uniformR, RandomGen, uniformShuffleList)
 import qualified Data.Map.Strict as Map (elemAt, empty,
-    union, filter, restrictKeys, withoutKeys)
+    union, filter, filterWithKey, restrictKeys, withoutKeys)
 import qualified Data.Set as Set (difference, intersection,
     union, difference, empty, filter, elemAt, insert, filter,
     unions)
@@ -32,11 +32,14 @@ import Game.CursedTreasure.Types
     , PlayerMove
     , TerrainHex (..)
     , allPlayerColors
+    , allClueColors
     , Score (..)
     , HexBoard
     , allFeatures
     , Deck
     , TreasureBoard
+    , PlayerMove (..)
+    , GameMode (..)
     )
 import Game.Core.Primitives
     ( TokenSpace (..)
@@ -95,8 +98,11 @@ censorHiddenInfo g viewerId =
             (map (const HiddenTreasure) drawPile, discardPile)
 
         censorRaisingTreasure :: RaisingTreasureState -> RaisingTreasureState
-        censorRaisingTreasure rt =
-            rt { treasureChest = map (const HiddenTreasure) rt.treasureChest }
+        censorRaisingTreasure rt = rt
+            { rtTreasureChest = first (showDeckOpt (null rt.rtViewing)) rt.rtTreasureChest }
+
+        showDeckOpt True (t:rest) = t:map (const HiddenTreasure) rest
+        showDeckOpt _ d = map (const HiddenTreasure) d
 
 createNewPlayer :: PlayerDescription -> PlayerState
 createNewPlayer pd = initPlayerState
@@ -420,7 +426,7 @@ nextTurn gameState = assignPlayer mCurrentPlayer . setNotActive $ gameState
             assignPlayer Nothing s = s & messageL %~ (("Could not find playerId " <> show playerId) <>)
             assignPlayer _ s =
                 s & playerL playerId %~ setPlayerTurn
-                  & playerTurnL %~ const playerId 
+                  & playerTurnL %~ const playerId
                   & playerActiveL %~ const playerId
                   & turnL %~ (+1)
 
@@ -495,8 +501,116 @@ turnL = lens (.turn) (\gameState t -> gameState { turn = t })
 cluesL :: Lens' PlayerState [ClueCard]
 cluesL = lens (.clues) (\playerState clues -> playerState { clues = clues })
 
+passTurnOption :: (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+passTurnOption (GameModeNominal, moves) = (GameModeNominal, PassTurn:moves)
+passTurnOption modeMoves = modeMoves
+
+isRaisingTreasure :: GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+isRaisingTreasure gS (mode, moves) = case gS.raisingTreasure of
+    Nothing -> (mode, moves)
+    Just treasureState -> if not (null treasureState.rtViewing)
+        then (GameModeRaisingTreasureView treasureState, moves)
+        else (GameModeRaisingTreasureChoice treasureState, moves)
+
+raisingTreasureChoiceCase :: PlayerState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+raisingTreasureChoiceCase player (GameModeRaisingTreasureChoice ts, moves)
+    = (GameModeRaisingTreasureChoice ts, pushOptions moves)
+    where   pushOptions = case (ts.rtTreasureChest, player.amulets > 0) of
+                ((Curse:_, _), True) -> (RaisingTreasureAcceptCurse:) . (RaisingTreasureWardCurse:)
+                ((Curse:_, _), False) -> (RaisingTreasureAcceptCurse:)
+                _ -> (RaisingTreasurePass:) . (RaisingTreasureTake:)
+raisingTreasureChoiceCase _ gMoves = gMoves
+
+raisingTreasureViewCase :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+raisingTreasureViewCase _ _ (GameModeRaisingTreasureView ts, moves) =
+    (GameModeRaisingTreasureView ts, RaisingTreasurePass:moves)
+raisingTreasureViewCase _ _ gMoves = gMoves
+
+findLocations :: (TokenSpaceIndex -> TerrainHex -> Bool) -> Map TokenSpaceIndex TerrainHex
+    -> Map TokenSpaceIndex TerrainHex
+findLocations = Map.filterWithKey
+
+mFindLocationList :: (TokenSpaceIndex -> TerrainHex -> Bool) -> Map TokenSpaceIndex TerrainHex
+    -> Maybe (NonEmpty (TokenSpaceIndex, TerrainHex))
+mFindLocationList filt board = nonEmpty . toPairs $ findLocations filt board
+
+hasToken :: TerrainToken -> TokenSpaceIndex -> TerrainHex -> Bool
+hasToken t _ (TerrainHex _ ts) = t `elem` ts
+
+findFirstToken :: TerrainToken -> Map TokenSpaceIndex TerrainHex -> Maybe (TokenSpaceIndex, TerrainHex)
+findFirstToken t = (head <$>) . mFindLocationList (hasToken t)
+
+raiseTreasureCase :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+raiseTreasureCase player gS (GameModeNominal, moves) =
+    (GameModeNominal, (RaiseTreasure <$> validColors) ++ moves)
+    where   validColors = mapMaybe mColor $ filter exactlyOne possibleColorTokens
+            jeepHex = findFirstToken (PlayerJeep player.player.playerId) gS.terrainBoard.tokens
+            tokenList = maybe [] (\(_, TerrainHex _ ts) -> ts) jeepHex
+            possibleColorTokens = filter (isJust . mColor) tokenList
+            mColor (ClueToken t) = Just t
+            mColor _ = Nothing
+            exactlyOne t = ((1 ==) . length) $ findLocations (hasToken t) gS.terrainBoard.tokens
+raiseTreasureCase _ _ gMoves = gMoves
+
+pickupAmuletCase :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+pickupAmuletCase player gS (GameModeNominal, moves) = (GameModeNominal, possibleAmulet moves)
+    where   jeepHex = findFirstToken (PlayerJeep player.player.playerId) gS.terrainBoard.tokens
+            tokenList = maybe [] (\(_, TerrainHex _ ts) -> ts) jeepHex
+            possibleAmulet | Amulet `elem` tokenList = (PickupAmulet:)
+                           | otherwise = id
+pickupAmuletCase _ _ gMoves = gMoves
+
+useAmuletCase :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+useAmuletCase player gS (GameModeNominal, moves) | player.amulets == 0 = (GameModeNominal, moves)
+                                                 | otherwise = foldr ($) (GameModeNominal, moves) enumerators
+    where   enumerators =   [ addAmuletMoveOption
+                            , addAmuletExchangeCards
+                            , addAmuletPlayClue
+                            , addAmuletRemoveSiteMarker ]
+            addAmuletMoveOption = if player.availableJeepMoves == 0 then second (UseAmuletIncrMove:) else id
+            addAmuletExchangeCards = if player.availableClueCardExchange == 0 then second (UseAmuletExchangeCards:) else id
+            addAmuletPlayClue = if player.availableCluePlays == 0 then second (possibleCluePlays ++) else id
+            addAmuletRemoveSiteMarker = second (possibleRemoveMarkers ++)
+            possibleCluePlays = map convertPlay
+                (snd $ enumeratePossibleCluePlays (player { availableCluePlays = 1 }) gS (GameModeNominal, []))
+            convertPlay (PlayClue color clue) = UseAmuletPlayClue color clue
+            convertPlay p = p
+            colorToLocations = uncurry findLocations . (, gS.terrainBoard.tokens) . hasToken . ClueToken
+            colorLocations = filter ((> 1) . length . snd) $ zip allClueColors (map colorToLocations allClueColors)
+            possibleRemoveMarkers = concatMap (asRemovePlay . second keys) colorLocations
+            asRemovePlay (c, locs) = mapMaybe ((uncurry (UseAmuletRemoveSiteMarker c) <$>) . locToTuple) locs
+            locToTuple (TokenSpace2DIndex x y) = Just (x, y)
+            locToTuple _ = Nothing
+useAmuletCase _ _ gMoves = gMoves
+
+enumeratePossibleCluePlays :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+enumeratePossibleCluePlays player gS (mode, moves) = undefined
+
+enumeratePossibleJeepMoves :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+enumeratePossibleJeepMoves player gS (mode, moves) = undefined
+
+enumeratePlayerOptions :: PlayerState -> GameState -> (GameMode, [PlayerMove])
+enumeratePlayerOptions player gS = foldr ($) (GameModeNominal, []) enumerators
+    where   enumerators =   [ passTurnOption
+                            , enumeratePossibleCluePlays player gS
+                            , useAmuletCase player gS
+                            , pickupAmuletCase player gS
+                            , raiseTreasureCase player gS
+                            , raisingTreasureChoiceCase player
+                            , raisingTreasureViewCase player gS
+                            , enumeratePossibleJeepMoves player gS
+                            , isRaisingTreasure gS
+                            ]
+
 enumerateActivePlayerOptions :: GameState -> [PlayerMove]
-enumerateActivePlayerOptions = undefined
+enumerateActivePlayerOptions gS = enumerateMoves ePlayer
+    where   ePlayer = findPlayer gS.activePlayer gS
+            enumerateMoves (Left e) = [PlayerMoveError e]
+            enumerateMoves (Right player) = case enumeratePlayerOptions player gS of
+                (GameModeError e, moves) -> PlayerMoveError e:moves
+                (_, moves) -> moves
+
+
 
 makeMove :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
 makeMove = undefined
