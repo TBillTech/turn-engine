@@ -83,7 +83,7 @@ data ClueCard
 
 data TreasureCard
     = HiddenTreasure | Treasure Int | Curse
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
 
 data PlayerDescription = PlayerDescription
     { playerId :: PlayerId
@@ -94,20 +94,20 @@ data PlayerDescription = PlayerDescription
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 data Score = CurrentScore Int | WinnerScore Int
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    deriving (Show, Ord, Eq, Generic, FromJSON, ToJSON)
 
 data PlayerState = PlayerState
     { player :: PlayerDescription
     , clues :: [ClueCard]
     , amulets :: Int
-    , treasures :: [Int]
+    , foundTreasures :: [TreasureCard]
     , availableJeepMoves :: Int
     , availableCluePlays :: Int
     , availableRemoveMarkers :: Int
     , availablePickupAmulet :: Int
     , availableClueCardExchange :: Int
     , score :: Score
-    , treasureCards :: [TreasureCard]
+    , viewingTreasures :: [TreasureCard]
     }
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
@@ -123,7 +123,7 @@ data TerrainToken
 data TerrainHex = TerrainHex Bool Feature [TerrainToken]
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
-type ClueBoard = TokenSpace (PlayerId, ClueCard)
+type ClueBoard = [(PlayerId, ClueCard)]
 
 type HexBoard = TokenSpace TerrainHex
 
@@ -187,9 +187,11 @@ data PlayerMove = PlayerMoveError Text
     | RaisingTreasureTake
     | RaisingTreasureWardCurse
     | RaisingTreasureAcceptCurse
+    deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 data GameMode = GameModeNominal
     | GameModeError Text
     | GameModeMustMoveJeep
     | GameModeRaisingTreasureView RaisingTreasureState
     | GameModeRaisingTreasureChoice RaisingTreasureState
+    deriving (Show, Eq, Generic, FromJSON, ToJSON)

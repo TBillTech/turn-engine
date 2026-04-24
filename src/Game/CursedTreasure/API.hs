@@ -7,10 +7,10 @@ module Game.CursedTreasure.API
     )
 where
 
-import Lens.Micro.Platform ((%~), Lens', lens, traversed, _1, _2, Traversal')
+import Lens.Micro.Platform ((%~), Lens', lens, Traversal')
 import Relude.Extra (bimapF, maximum1)
 import Relude.Extra.Map (insert, keys, member, notMember, toPairs, alter)
-import System.Random (mkStdGen, uniformR, RandomGen, uniformShuffleList)
+import System.Random (mkStdGen, uniformR, RandomGen, uniformShuffleList, splitGen, StdGen)
 import qualified Data.Map.Strict as Map (elemAt, empty,
     union, filter, filterWithKey, restrictKeys, withoutKeys)
 import qualified Data.Set as Set (difference, intersection,
@@ -22,6 +22,7 @@ import Game.CursedTreasure.Types
     , ClueCard (..)
     , ClueObject (..)
     , ClueColor (..)
+    , ClueBoard
     , Feature (..)
     , GameState (..)
     , PlayerDescription (..)
@@ -50,7 +51,6 @@ import Game.Core.Primitives
     , adjacentIndices
     , isAdjacentIndex
     , policyFourSquareDistance)
-import GHC.IOArray (boundsIOArray)
 
 getAllPlayerColors :: [PlayerDescription]
 getAllPlayerColors = zipWith mkPlayerDescription [1 ..] allPlayerColors
@@ -63,11 +63,15 @@ getAllPlayerColors = zipWith mkPlayerDescription [1 ..] allPlayerColors
                 , playerColor = c
                 }
 
+censorGame :: GameState -> (GameState, [CensoredGameState])
+censorGame = censor
+    where   playerIds s = map (\pd -> pd.player.playerId) s.players
+            censor s = (s, map (censorHiddenInfo s) $ playerIds s)
+
+
 createNewGame :: [PlayerDescription] -> Int -> (GameState, [CensoredGameState])
-createNewGame players randomSeed = censor newGameState
+createNewGame players randomSeed = censorGame newGameState
     where newGameState = createNewGameState players randomSeed
-          playerIds = map (\pd -> pd.playerId) players
-          censor s = (s, map (censorHiddenInfo s) playerIds)
 
 -- | censorHiddenInfo censors (Converts to "Hidden" states) the following:
 -- | * Other players clues
@@ -91,7 +95,7 @@ censorHiddenInfo g viewerId =
             | otherwise =
                 ps
                     { clues = map (const HiddenClue) ps.clues
-                    , treasureCards = map (const HiddenTreasure) ps.treasureCards
+                    , viewingTreasures = map (const HiddenTreasure) ps.viewingTreasures
                     }
 
         censorClueDeck (drawPile, discardPile) = (map (const HiddenClue) drawPile, discardPile)
@@ -112,14 +116,14 @@ createNewPlayer pd = initPlayerState
             { player = pd
             , clues = []
             , amulets = 0
-            , treasures = []
+            , foundTreasures = []
             , availableJeepMoves = 0
             , availableCluePlays = 0
             , availableRemoveMarkers = 0
             , availablePickupAmulet = 0
             , availableClueCardExchange = 0
             , score = CurrentScore 0
-            , treasureCards = [] }
+            , viewingTreasures = [] }
 
 mkWithinStepsOfClues :: ClueObject -> [ClueCard]
 mkWithinStepsOfClues co = [WithinStepsOf 1 co
@@ -421,7 +425,7 @@ createNewGameState playerDs randomSeed
             newPlayers = map createNewPlayer playerDs
             firstPlayer = maybe (PlayerId 0) (\(p, _) -> p.player.playerId) $ uncons newPlayers
             firstPlayerName = maybe "Missing" (\(p, _) -> p.player.playerName) $ uncons newPlayers
-            g = mkStdGen randomSeed
+            g = fst $ mkStdGenN randomSeed 0
             (randomizedClues, gT) = uniformShuffleList allClues g
             (stackedTreasure, gB) = stackTreasure gT
             board = createBoard gB
@@ -433,12 +437,30 @@ createNewGameState playerDs randomSeed
             dealCluesToPlayer 0 _ s = s
             dealCluesToPlayer n pId s = dealCluesToPlayer (n-1) pId $
                 s & messageL %~ eUpd & clueDeckL %~ deckUpd & playerL pId %~ psUpd
-                where (eUpd, deckUpd, psUpd) = getUpds $ dealClueCardToPlayer s.clueDeck (findPlayer pId s)
-                      getUpds (Left e) = ((e <>), id, id)
-                      getUpds (Right (dUpd, pUpd)) = (id, dUpd, pUpd)
+                where (eUpd, deckUpd, psUpd, _) = _eitherUpdates3 $
+                        dealClueCardToPlayer (0, 0) s.clueDeck (findPlayer pId s)
+
+_eitherUpdates :: Semigroup a1 => Either a1 (a2 -> a2) -> (a1 -> a1, a2 -> a2)
+_eitherUpdates (Left e) = ((e <>), id)
+_eitherUpdates (Right upd) = (id, upd)
+
+_eitherUpdates2 :: Semigroup a1 => Either a1 (a2 -> a2, a3 -> a3)
+    -> (a1 -> a1, a2 -> a2, a3 -> a3)
+_eitherUpdates2 (Left e) = ((e <>), id, id)
+_eitherUpdates2 (Right (updA, updB)) = (id, updA, updB)
+
+_eitherUpdates3 :: Semigroup a1 => Either a1 (a2 -> a2, a3 -> a3, a4 -> a4)
+    -> (a1 -> a1, a2 -> a2, a3 -> a3, a4 -> a4)
+_eitherUpdates3 (Left e) = ((e <>), id, id, id)
+_eitherUpdates3 (Right (updA, updB, updC)) = (id, updA, updB, updC)
+
+_eitherUpdates4 :: Semigroup a1 => Either a1 (a2 -> a2, a3 -> a3, a4 -> a4, a5 -> a5)
+    -> (a1 -> a1, a2 -> a2, a3 -> a3, a4 -> a4, a5 -> a5)
+_eitherUpdates4 (Left e) = ((e <>), id, id, id, id)
+_eitherUpdates4 (Right (updA, updB, updC, updD)) = (id, updA, updB, updC, updD)
 
 newTreasureBoard :: ClueColor -> TreasureBoard
-newTreasureBoard c = (c, TokenSpace { adjacency = IndexAdjacency, tokens = Map.empty })
+newTreasureBoard c = (c, [])
 
 nextTurn :: GameState -> GameState
 nextTurn gameState = assignPlayer mCurrentPlayer . setNotActive $ gameState
@@ -476,20 +498,37 @@ setPlayerTurn ps = ps   { availableJeepMoves = 3
                         , availablePickupAmulet = 1
                         , availableClueCardExchange = 1 }
 
-dealClueCardToPlayer :: Deck ClueCard -> Either Text PlayerState
-    -> Either Text (Deck ClueCard -> Deck ClueCard, PlayerState -> PlayerState)
-dealClueCardToPlayer _ (Left e) = Left e
-dealClueCardToPlayer (draw, _) (Right pS)
-    = bimapF first (cluesL %~) (moveCard Nothing draw pS.clues)
+mkStdGenN :: Int -> Int -> (StdGen, StdGen)
+mkStdGenN seed 0 = splitGen $ mkStdGen seed
+mkStdGenN seed n = splitGen (snd $ mkStdGenN seed (n-1))
 
-moveCard :: (Eq a, Show a) => Maybe a -> [a] -> [a]
-    -> Either Text ([a] -> [a], [a] -> [a])
-moveCard Nothing [] _ = Left "Cannot pop card from list"
-moveCard Nothing (top:_) _ = Right (drop 1, (top:))
-moveCard (Just c) fromL _ =
+dealClueCardToPlayer :: (Int, Int) -> Deck ClueCard -> Either Text PlayerState
+    -> Either Text (Deck ClueCard -> Deck ClueCard, PlayerState -> PlayerState, (Int, Int) -> (Int, Int))
+dealClueCardToPlayer _ _ (Left e) = Left e
+dealClueCardToPlayer gSeed (draw, discard) (Right pS)
+    = withSeedUpd <$> bimapF toDeckUpd (cluesL %~) (moveCard Nothing id draw' pS.clues)
+    where   withSeedUpd (deckUpd, pUpd) = (deckUpd, pUpd, seedUpd)
+            toDeckUpd = if null draw then const . const (drop 1 randomizedClues, []) else first
+            seedUpd = if null draw then second (+1) else id
+            rG = fst $ mkStdGenN (snd gSeed) $ fst gSeed
+            randomizedClues = fst $ uniformShuffleList discard rG
+            draw' = if null draw then randomizedClues else draw
+
+moveCards :: (Eq a, Show a, Eq b, Show b) => Int -> Maybe a -> (a -> b) -> [a] -> [b]
+    -> Either Text ([a] -> [a], [b] -> [b])
+moveCards 0 _ _ _ _ = Right (id, id)
+moveCards n mSpecific convert from to = (uncurry bimap . bimap (.) (.) <$> eMoveCard)
+    <*> moveCards (n-1) mSpecific convert from to
+    where   eMoveCard = moveCard mSpecific convert from to
+
+moveCard :: (Eq a, Show a, Eq b, Show b) => Maybe a -> (a -> b) -> [a] -> [b]
+    -> Either Text ([a] -> [a], [b] -> [b])
+moveCard Nothing _  [] _ = Left "Cannot pop card from list"
+moveCard Nothing toB (top:_) _ = Right (drop 1, (toB top:))
+moveCard (Just c) toB fromL _ =
     case break (== c) fromL of
         (_, []) -> Left $ "Could not find card " <> show c
-        (before, _:after) -> Right (const $ before <> after, (c :))
+        (before, _:after) -> Right (const $ before <> after, (toB c :))
 
 playerL :: PlayerId -> Traversal' GameState PlayerState
 playerL wantedId handler gameState =
@@ -499,12 +538,11 @@ playerL wantedId handler gameState =
         | playerState.player.playerId == wantedId = handler playerState
         | otherwise = pure playerState
 
-findPlayer :: PlayerId -> GameState -> Either Text PlayerState
-findPlayer wantedId gameState = maybeToRight ("Count not find player " <> show wantedId) $
-    find ((wantedId == ) . (.player.playerId)) gameState.players
-
 clueDeckL :: Lens' GameState ([ClueCard], [ClueCard])
 clueDeckL = lens (.clueDeck) (\gameState clueDeck -> gameState { clueDeck = clueDeck })
+
+treasureDeckL :: Lens' GameState ([TreasureCard], [TreasureCard])
+treasureDeckL = lens (.treasureDeck) (\gameState treasureDeck -> gameState { treasureDeck = treasureDeck })
 
 messageL :: Lens' GameState Text
 messageL = lens (.latestMessage) (\gameState message -> gameState { latestMessage = message })
@@ -523,6 +561,38 @@ turnL = lens (.turn) (\gameState t -> gameState { turn = t })
 
 cluesL :: Lens' PlayerState [ClueCard]
 cluesL = lens (.clues) (\playerState clues -> playerState { clues = clues })
+
+boardL :: Lens' GameState HexMap
+boardL = lens (.terrainBoard.tokens)
+    (\gameState board -> gameState { terrainBoard = gameState.terrainBoard { tokens = board}})
+
+seedL :: Lens' GameState (Int, Int)
+seedL = lens (.seed)
+    (\gameState seed -> gameState { seed = seed})
+
+treasureL :: ClueColor -> Traversal' GameState ClueBoard
+treasureL wantedColor handler gameState =
+    (\treasures -> gameState { treasureBoards = treasures }) <$> traverse visit gameState.treasureBoards
+  where
+    visit treasure@(color, board)
+        | color == wantedColor = (color, ) <$> handler board
+        | otherwise = pure treasure
+
+activePlayerL :: Lens' GameState PlayerId
+activePlayerL = lens (.activePlayer)
+    (\gameState activePlayer -> gameState { activePlayer = activePlayer})
+
+raiseTreasureL :: Lens' GameState (Maybe RaisingTreasureState)
+raiseTreasureL = lens (.raisingTreasure)
+    (\gameState raisingTreasure -> gameState { raisingTreasure = raisingTreasure})
+
+findPlayer :: PlayerId -> GameState -> Either Text PlayerState
+findPlayer wantedId gameState = maybeToRight ("Could not find player " <> show wantedId) $
+    find ((wantedId == ) . (.player.playerId)) gameState.players
+
+findTreasure :: ClueColor -> GameState -> Either Text ClueBoard
+findTreasure color gameState = maybeToRight ("Could not find treasure " <> show color) $
+    snd <$> find ((color ==) . fst) gameState.treasureBoards
 
 passTurnOption :: (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
 passTurnOption (GameModeNominal, moves) = (GameModeNominal, PassTurn:moves)
@@ -645,7 +715,7 @@ enumeratePossibleCluePlays player gS (GameModeNominal, moves) = (GameModeNominal
 enumeratePossibleCluePlays _ _ gMoves = gMoves
 
 enumeratePossibleJeepMoves :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
-enumeratePossibleJeepMoves player gS (GameModeNominal, moves) 
+enumeratePossibleJeepMoves player gS (GameModeNominal, moves)
     | player.availableJeepMoves == 0 = (GameModeNominal, moves)
     | null oneLeg = (GameModeMustMoveJeep, mapMaybe toMove unconstrained)
     | otherwise = (GameModeNominal, mapMaybe toMove oneLeg)
@@ -655,7 +725,7 @@ enumeratePossibleJeepMoves player gS (GameModeNominal, moves)
                                      Nothing -> []
             legSet k = Set.unions $ distanceSet 1 (one k):
                 map (fromList . keys) (filter (member k) connectedSets)
-            unconstrained = map fst $ filter ((\(TerrainHex _ f _) -> f /= Ocean) . snd) $ 
+            unconstrained = map fst $ filter ((\(TerrainHex _ f _) -> f /= Ocean) . snd) $
                 toPairs gS.terrainBoard.tokens
             toMove (TokenSpace2DIndex i j) = Just $ MoveJeep i j
             toMove _ = Nothing
@@ -684,6 +754,283 @@ enumerateActivePlayerOptions gS = enumerateMoves ePlayer
                 (_, moves) -> moves
 
 
+playClueAndUpdate :: ClueColor -> ClueCard -> PlayerId -> GameState
+    -> Either Text (HexMap -> HexMap, PlayerState -> PlayerState, ClueBoard -> ClueBoard)
+playClueAndUpdate color card pId gS = eVerifyCard <*> eUpdates
+    where   ePlayer = findPlayer pId gS
+            eClueBoard = findTreasure color gS
+            eVerifyCard = id <$ (findCard =<< ePlayer)
+            findCard player = if card `elem` player.clues then Right card
+                else Left $ "Could not find " <> show card <> " in player " <> show pId <> " clues."
+            boardUpd = snd . flip applyClue (color, card)
+            eClues = (.clues) <$> ePlayer
+            eCluesAndBoard = (,) <$> eClues <*> eClueBoard
+            eCardUpds = uncurry (moveCard (Just card) (pId, )) =<< eCluesAndBoard
+            updPlayer playerCardUpd player = player { clues = playerCardUpd player.clues }
+            eUpdates = (\(psU, bU) -> (boardUpd, updPlayer psU, bU)) <$> eCardUpds
+
+dealCardsDirect :: Int -> PlayerId -> GameState -> GameState
+dealCardsDirect 0 _ gS = gS
+dealCardsDirect n pId gS = gS & dealCardsDirect (n-1) pId
+    & messageL %~ eDeckUpd & clueDeckL %~ deckUpd & playerL pId %~ psUpd & seedL %~ seedUpd
+    where   (eDeckUpd, deckUpd, psUpd, seedUpd) = _eitherUpdates3 $
+                dealClueCardToPlayer gS.seed gS.clueDeck (findPlayer pId gS)
+
+alterTokenList :: ([TerrainToken] -> [TerrainToken]) -> Maybe TokenSpaceIndex -> HexMap -> HexMap
+alterTokenList updTs (Just k) = alter (updateTokenList <$>) k
+    where updateTokenList (TerrainHex isL f ts) = TerrainHex isL f (updTs ts)
+alterTokenList _ Nothing = id
+
+playClueDirect :: ClueColor -> ClueCard -> GameState -> GameState
+playClueDirect color card gS =
+    gS  & dealCard & messageL %~ eUpd & boardL %~ markerUpd & playerL pId %~ playedCardUpd
+        & treasureL color %~ treasureBoardUpd
+    where   pId = gS.activePlayer
+            ePlayClueUpds = playClueAndUpdate color card pId gS
+            (eUpd, markerUpd, playedCardUpd, treasureBoardUpd) = _eitherUpdates3 ePlayClueUpds
+            dealCard = if isRight ePlayClueUpds then dealCardsDirect 1 pId else id
+
+moveJeepDirect :: Int -> Int -> GameState -> GameState
+moveJeepDirect i j gS =
+    gS  & boardL %~ addJeep & boardL %~ removeJeep
+    where   jeep = PlayerJeep gS.activePlayer
+            mJeepHex = fst <$> findFirstToken jeep gS.terrainBoard.tokens
+            removeJeep = alterTokenList (filter (/= jeep)) mJeepHex
+            addJeep = alterTokenList (jeep:) (Just $ TokenSpace2DIndex i j)
+
+exchangeCardsDirect :: GameState -> GameState
+exchangeCardsDirect gS =
+    gS  & dealCards & messageL %~ errDiscardUpd & clueDeckL %~ clueUpd
+        & playerL pId %~ playerDiscardUpd
+    where   pId = gS.activePlayer
+            dealCards = if isRight eDiscardUpds then dealCardsDirect 4 pId else id
+            (errDiscardUpd, toDiscardUpd, playerCluesUpd) = _eitherUpdates2 eDiscardUpds
+            clueUpd = second toDiscardUpd
+            playerDiscardUpd player = player { clues = playerCluesUpd player.clues }
+            ePlayer = findPlayer pId gS
+            eDiscardUpds = moveCards 4 Nothing id (either (const []) (.clues) ePlayer) (snd gS.clueDeck)
+
+dealTreasureCardDirect :: PlayerId -> GameState -> GameState
+dealTreasureCardDirect anId s = s & playerL anId %~ updTCards & treasureDeckL %~ updTDeck
+    where   updTCards player = player { viewingTreasures = topCard ++ player.viewingTreasures }
+            topCard = take 1 $ fst s.treasureDeck
+            updTDeck = first $ drop 1
+
+raiseTreasureShuffle :: GameState -> GameState
+raiseTreasureShuffle s =
+    s & raiseTreasureL %~ (shuffleTCards <$>) & seedL %~ updSeed & raiseTreasureChooseStart
+    where   cards = maybe [] (fst . (.rtTreasureChest)) s.raisingTreasure
+            updSeed = second (+1)
+            rG = fst $ mkStdGenN (snd s.seed) $ fst s.seed
+            randomizedTreasures = fst $ uniformShuffleList cards rG
+            shuffleTCards rt = rt { rtTreasureChest = (randomizedTreasures, [])}
+
+raiseTreasureFinished :: GameState -> GameState
+raiseTreasureFinished s =
+    s & clearRaising & setActivePlayer & playersL %~ (scorePlayer <$>) & checkGameWinner
+    where   mCards :: Maybe (NonEmpty TreasureCard)
+            mCards = do
+                raising <- s.raisingTreasure
+                nonEmpty (fst raising.rtTreasureChest)
+            clearRaising gS = gS { raisingTreasure = Nothing }
+            toInt (Treasure i) = i
+            toInt _ = 0
+            score player = player.amulets + 10 * sum (map toInt player.foundTreasures)
+            scorePlayer player = player { score = CurrentScore $ score player}
+            maxS = maybe 0 maximum1 $ nonEmpty (score <$> s.players)
+            checkGameWinner gS  | isNothing mCards = gS & playersL %~ (setWinner <$>)
+                                | otherwise = gS
+            setWinner player = player { score = if CurrentScore maxS == player.score
+                                                then WinnerScore maxS else player.score }
+
+raiseTreasureNextChooser :: GameState -> GameState
+raiseTreasureNextChooser s  | isNothing mNextPlayerIndex = s & raiseTreasureFinished
+                            | otherwise = s & raiseTreasureL %~ (updChooser <$>) & setActivePlayer
+    where   mNextPlayerIndex = do
+                raising <- s.raisingTreasure
+                _ <- nonEmpty (fst raising.rtTreasureChest)
+                neOrder <- nonEmpty raising.rtOrder
+                let rtPlayerIndex = raising.rtPlayerIndex
+                    rtNextPlayerIndex = rtPlayerIndex+1 `mod` length neOrder
+                pure rtNextPlayerIndex
+
+            updChooser rt = rt { rtPlayerIndex = fromMaybe 0 mNextPlayerIndex }
+
+raiseTreasureChooseStart :: GameState -> GameState
+raiseTreasureChooseStart s  | isNothing mOrder = s & raiseTreasureFinished
+                            | otherwise = s & raiseTreasureL %~ (updChooser <$>) & setActivePlayer
+    where   mOrder = do
+                raising <- s.raisingTreasure
+                _ <- nonEmpty (fst raising.rtTreasureChest)
+                nonEmpty raising.rtOrder
+            updChooser rt = rt { rtPlayerIndex = 0 }
+
+setActivePlayer :: GameState -> GameState
+setActivePlayer gS
+    | isNothing gS.raisingTreasure = gS & activePlayerL %~ const gS.playerTurn
+    | isJust mViewer || isJust mChooser = gS & activePlayerL %~ maybe id const (mViewer <|> mChooser)
+    | otherwise = gS & messageL %~ ("Error no viewers or chooers in Treasure State" <>)
+    where   mViewer = do
+                raising <- gS.raisingTreasure
+                neViewing <- nonEmpty raising.rtViewing
+                pure (head neViewing)
+            mChooser = do
+                raising <- gS.raisingTreasure
+                neOrder <- nonEmpty raising.rtOrder
+                let rtPlayerIndex = raising.rtPlayerIndex
+                    rtNextPlayerIndex = rtPlayerIndex+1 `mod` length neOrder
+                neAtPlayerIndex <- nonEmpty $ drop rtNextPlayerIndex (toList neOrder)
+                pure (head neAtPlayerIndex)
+
+raiseTreasureViewPass :: GameState -> GameState
+raiseTreasureViewPass s =
+    s   & playerL pId %~ updTCards & treasureDeckL %~ updTDeck & raiseTreasureL %~ (updViewers <$>)
+        & setActivePlayer & if lastViewer then raiseTreasureShuffle else id
+    where   pId = s.activePlayer
+            ePlayer = findPlayer pId s
+            playerCards = either (const []) (.viewingTreasures) ePlayer
+            updTCards player = player { viewingTreasures = [] }
+            updTDeck = first (playerCards ++)
+            lastViewer = maybe False ((== 1) . length . (.rtViewing)) mRaising
+            mRaising = s.raisingTreasure
+            updViewers rt = rt { rtViewing = drop 1 rt.rtViewing}
+
+makeMoveParanoid :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
+makeMoveParanoid gS move | move `elem` enumerateActivePlayerOptions gS = makeMoveDirect gS move
+                         | otherwise = censorGame $ gS & messageL %~ (e <>)
+    where e = "Move " <> show move <> " is not allowed for current player."
 
 makeMove :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
-makeMove = undefined
+makeMove = makeMoveParanoid
+
+isViewingTreasure :: GameState -> Bool
+isViewingTreasure gS = mMode == Just True
+    where   mMode = do
+                raising <- gS.raisingTreasure
+                let isViewing = not . null $ raising.rtViewing
+                pure isViewing
+
+isLastChooser :: GameState -> Bool
+isLastChooser gS = mMode == Just True
+    where   mMode = do
+                raising <- gS.raisingTreasure
+                let rtPlayerIndex = raising.rtPlayerIndex
+                    isLastChoice = rtPlayerIndex == length raising.rtOrder - 1
+                pure isLastChoice
+
+makeMoveDirect :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
+makeMoveDirect gS (PlayerMoveError e) = censorGame $ gS & messageL %~ (e <>)
+makeMoveDirect gS PassTurn = censorGame $ nextTurn gS
+makeMoveDirect gS (PlayClue color card) = censorGame $
+    gS & playClueDirect color card & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            playerUsedOptions player = player { availableJeepMoves = 0
+                                              , availableCluePlays = 0
+                                              , availableRemoveMarkers = 0
+                                              , availableClueCardExchange = 0}
+makeMoveDirect gS (MoveJeep i j) = censorGame $
+    gS & moveJeepDirect i j & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            playerUsedOptions player = player { availableJeepMoves = player.availableJeepMoves - 1
+                                              , availableCluePlays = 0
+                                              , availableRemoveMarkers = 0
+                                              , availableClueCardExchange = 0}
+makeMoveDirect gS ExchangeClueCards = censorGame $
+    gS & exchangeCardsDirect & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            playerUsedOptions player = player { availableJeepMoves = 0,
+                                                availableCluePlays = 0,
+                                                availableRemoveMarkers = 0,
+                                                availableClueCardExchange = 0}
+makeMoveDirect gS PickupAmulet = censorGame $
+    gS  & messageL %~ errorUpd & boardL %~ boardUpd & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            ePlayer = findPlayer pId gS
+            jeep = PlayerJeep gS.activePlayer
+            mJeepHex = findFirstToken jeep gS.terrainBoard.tokens
+            amuletUpd = alterTokenList (filter (/= Amulet)) (fst <$> mJeepHex)
+            incrAmulet player = player { amulets = player.amulets + 1,
+                                         availablePickupAmulet = 0}
+            errorUpd    | isLeft ePlayer = (fromLeft "" ePlayer <>) :: (Text -> Text)
+                        | isNothing mJeepHex = (("Could not find " <> show pId <> " jeep.") <> )
+                        | otherwise = id
+            hasError = isLeft ePlayer || isNothing mJeepHex
+            boardUpd = if hasError then id else amuletUpd
+            playerUsedOptions = if hasError then id else incrAmulet
+makeMoveDirect gS UseAmuletIncrMove = censorGame $
+    gS & messageL %~ errorUpd & playerL pId %~ playerUpd
+    where   pId = gS.activePlayer
+            ePlayer = do
+                player <- findPlayer pId gS
+                if player.amulets == 0
+                    then Left "Player has no remaining amulets"
+                    else Right playerUsedOptions
+            playerUsedOptions player = player { availableJeepMoves = player.availableJeepMoves + 3
+                                              , amulets = player.amulets - 1}
+            (errorUpd, playerUpd) = _eitherUpdates ePlayer
+makeMoveDirect gS (UseAmuletPlayClue color card) = censorGame $
+    gS & playClueDirect color card & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            playerUsedOptions player = player { amulets = player.amulets - 1 }
+makeMoveDirect gS UseAmuletExchangeCards = censorGame $
+    gS & exchangeCardsDirect & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            playerUsedOptions player = player { amulets = player.amulets - 1 }
+makeMoveDirect gS (UseAmuletRemoveSiteMarker color i j) = censorGame $
+    gS & boardL %~ boardUpd & playerL pId %~ playerUsedOptions
+    where   pId = gS.activePlayer
+            playerUsedOptions player = player { amulets = player.amulets - 1 }
+            boardUpd = alterTokenList (filter (/= ClueToken color)) (Just $ TokenSpace2DIndex i j)
+makeMoveDirect gS (RaiseTreasure color) = censorGame $
+    gS  & treasureDeckL %~ first (drop 1) & initTreasure
+        & dealTreasureCards pTurns & treasureL color %~ const [] & boardL %~ (clearColor <$>)
+        & nextTurn & setActivePlayer
+    where   pId = gS.activePlayer
+            pTurns = case filter ((color ==) . fst) gS.treasureBoards of
+                [(_, playerIds)] -> pId:map fst playerIds
+                _ -> [pId]
+            topCard = take 1 $ fst gS.treasureDeck
+            initTreasure s = s { raisingTreasure = Just initialRaisingTreasureState }
+            initialRaisingTreasureState = RaisingTreasureState
+                { rtTreasureChest = (topCard, [])
+                , rtOrder = pTurns
+                , rtPlayerIndex = 0
+                , rtViewing = pTurns}
+            clearColor (TerrainHex isL f ts) = TerrainHex isL f (filter (/= ClueToken color) ts)
+            dealTreasureCards [] s = s
+            dealTreasureCards (anId:rest) s =
+                s & dealTreasureCards rest & dealTreasureCardDirect anId
+makeMoveDirect gS RaisingTreasurePass
+    | isViewingTreasure gS = censorGame $ gS & raiseTreasureViewPass
+    | isLastChooser gS = censorGame $ gS & raiseTreasureL %~ (discardTop <$>) & raiseTreasureChooseStart
+    | otherwise = censorGame $ gS & raiseTreasureNextChooser
+    where   discardTop rT = rT { rtTreasureChest = discardOne rT.rtTreasureChest }
+            discardOne (p, d) = (drop 1 p, take 1 p ++ d)
+makeMoveDirect gS RaisingTreasureTake = censorGame $
+    gS  & raiseTreasureL %~ (removeTopT <$>) & raiseTreasureL %~ (removeTaker <$>)
+        & playerL takerId %~ giveTopT & raiseTreasureChooseStart
+    where   mRaising = gS.raisingTreasure
+            giveTopT player = player { foundTreasures = appTop player.foundTreasures }
+            appTop = maybe id ((<>) . take 1 . fst . (.rtTreasureChest)) mRaising
+            playerIndex = maybe 0 (.rtPlayerIndex) mRaising
+            takerId = gS.activePlayer
+            removeTopT rT = rT { rtTreasureChest = first (drop 1) rT.rtTreasureChest }
+            removeTaker rT = rT { rtPlayerIndex = 0
+                                , rtOrder = removePlayerIndex rT.rtOrder }
+            removePlayerIndex pList
+                = take playerIndex pList <> drop (playerIndex+1) pList
+makeMoveDirect gS RaisingTreasureWardCurse
+    | isLastChooser gS = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureFinished
+    | otherwise = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureNextChooser
+    where   pId = gS.activePlayer
+            decrAmulet player = player { amulets = player.amulets - 1 }
+makeMoveDirect gS RaisingTreasureAcceptCurse
+    | isLastChooser gS = censorGame $ gS & playerL pId %~ loseTreasure & raiseTreasureFinished
+    | otherwise = censorGame $ gS & playerL pId %~ loseTreasure & raiseTreasureNextChooser
+    where   pId = gS.activePlayer
+            loseTreasure player = player { foundTreasures = loseMax $ nonEmpty player.foundTreasures }
+            loseMax :: Maybe (NonEmpty TreasureCard) -> [TreasureCard]
+            loseMax Nothing = []
+            loseMax (Just ts) = let maxT = maximum1 ts
+                                    lTs = toList ts in
+                drop 1 (filter (== maxT) lTs) <> filter (/= maxT) lTs
