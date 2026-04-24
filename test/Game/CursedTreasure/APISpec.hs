@@ -60,14 +60,14 @@ spec = do
                         { player = p
                         , clues = cs
                         , amulets = 0
-                        , treasures = []
+                        , foundTreasures = []
                         , availableJeepMoves = 0
                         , availableCluePlays = 0
                         , availableRemoveMarkers = 0
                         , availablePickupAmulet = 0
                         , availableClueCardExchange = 0
                         , score = CurrentScore 0
-                        , treasureCards = ts
+                        , viewingTreasures = ts
                         }
 
                 terrainBoard = TokenSpace {adjacency = NonAdjacency, tokens = Map.empty}
@@ -88,9 +88,10 @@ spec = do
                         , raisingTreasure =
                             Just
                                 RaisingTreasureState
-                                    { treasureChest = [Treasure 7, Curse]
-                                    , takeOrder = [viewerId, otherId]
-                                    , takeIndex = 0
+                                    { rtTreasureChest = ([Treasure 7, Curse], [])
+                                    , rtOrder = [viewerId, otherId]
+                                    , rtPlayerIndex = 0
+                                    , rtViewing = []
                                     }
                         , latestMessage = ""
                         , gameOver = False
@@ -101,12 +102,12 @@ spec = do
 
             -- viewer's private info unchanged
             (g'.players !!? 0 <&> (.clues)) `shouldBe` Just viewerClues
-            (g'.players !!? 0 <&> (.treasureCards)) `shouldBe` Just viewerTreasures
+            (g'.players !!? 0 <&> (.viewingTreasures)) `shouldBe` Just viewerTreasures
 
             -- other player's private info hidden (same lengths)
             (g'.players !!? 1 <&> (.clues))
                 `shouldBe` Just (replicate (length otherClues) HiddenClue)
-            (g'.players !!? 1 <&> (.treasureCards))
+            (g'.players !!? 1 <&> (.viewingTreasures))
                 `shouldBe` Just (replicate (length otherTreasures) HiddenTreasure)
 
             -- draw piles hidden; discards unchanged
@@ -117,7 +118,7 @@ spec = do
             snd g'.treasureDeck `shouldBe` [Treasure 99]
 
             -- raising treasure chest hidden; rest unchanged
-            fmap (\rt -> rt.treasureChest) g'.raisingTreasure
-                `shouldBe` Just [HiddenTreasure, HiddenTreasure]
-            fmap (\rt -> rt.takeOrder) g'.raisingTreasure `shouldBe` Just [viewerId, otherId]
-            fmap (\rt -> rt.takeIndex) g'.raisingTreasure `shouldBe` Just 0
+            fmap (\rt -> rt.rtTreasureChest) g'.raisingTreasure
+                `shouldBe` Just ([Treasure 7, HiddenTreasure], [])
+            fmap (\rt -> rt.rtOrder) g'.raisingTreasure `shouldBe` Just [viewerId, otherId]
+            fmap (\rt -> rt.rtPlayerIndex) g'.raisingTreasure `shouldBe` Just 0
