@@ -1,9 +1,45 @@
 {-# LANGUAGE DerivingStrategies #-}
-module Game.CursedTreasure.Types where
+module Game.CursedTreasure.Types
+    ( PlayerColor(..)
+    , ClueColor(..)
+    , OtherColor(..)
+    , PlayerId
+    , mkPlayerId
+    , unPlayerId
+    , allPlayerIds
+    , Feature(..)
+    , allFeatures
+    , ClueObject(..)
+    , ClueCard(..)
+    , TreasureCard(..)
+    , PlayerDescription(..)
+    , Score(..)
+    , PlayerState(..)
+    , TerrainToken(..)
+    , TerrainHex (..)
+    , CubeCoordinate
+    , ClueBoard
+    , HexBoard
+    , Deck
+    , TreasureBoard
+    , GameState(..)
+    , ToGameState(..)
+    , CensoredGameState
+    , mkCensoredGameState
+    , censorRaisingTreasure
+    , RaisingTreasureState(..)
+    , PlayerMove(..)
+    , GameMode(..)
+    , mkPlayerColor
+    , allPlayerColors
+    , mkClueColor
+    , allClueColors
+    )
+where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), withScientific)
 
-import Game.Core.Primitives (TokenSpace,
+import Game.Core.Primitives (CubeCoordinateTokens, CubeCoordinate,
     HourHand, GameColor (..), ToGameColor(..), allGameColors)
 
 newtype PlayerColor = PlayerColor GameColor
@@ -27,8 +63,27 @@ newtype OtherColor = OtherColor GameColor
     deriving newtype (FromJSON, ToJSON)
 
 newtype PlayerId = PlayerId Int
-    deriving stock (Show, Eq, Generic)
-    deriving newtype (FromJSON, ToJSON)
+    deriving stock (Show, Eq, Ord, Generic)
+
+mkPlayerId :: Int -> Maybe PlayerId
+mkPlayerId playerId
+    | playerId `elem` [1 .. 4] = Just (PlayerId playerId)
+    | otherwise = Nothing
+
+unPlayerId :: PlayerId -> Int
+unPlayerId (PlayerId playerId) = playerId
+
+allPlayerIds :: [PlayerId]
+allPlayerIds = mapMaybe mkPlayerId [1 .. 4]
+
+instance FromJSON PlayerId where
+    parseJSON = withScientific "PlayerId" $ \value ->
+        case mkPlayerId (round value) of
+            Just playerId | fromIntegral (unPlayerId playerId) == value -> pure playerId
+            _ -> fail "PlayerId must be an integer from 1 to 4"
+
+instance ToJSON PlayerId where
+    toJSON = toJSON . unPlayerId
 
 instance ToGameColor OtherColor where
     toGameColor :: OtherColor -> GameColor
@@ -37,7 +92,7 @@ instance ToGameColor OtherColor where
 mkPlayerColor :: GameColor -> Maybe PlayerColor
 mkPlayerColor c | c `elem` colorList = Just (PlayerColor c)
                 | otherwise = Nothing
-    where colorList = [Red, Green, Blue, Purple, Yellow]
+    where colorList = [Red, Green, Blue, Purple]
 
 allPlayerColors :: [PlayerColor]
 allPlayerColors = mapMaybe mkPlayerColor allGameColors   
@@ -45,15 +100,10 @@ allPlayerColors = mapMaybe mkPlayerColor allGameColors
 mkClueColor :: GameColor -> Maybe ClueColor
 mkClueColor c | c `elem` colorList = Just (ClueColor c)
               | otherwise = Nothing
-    where colorList = [White, Black, DarkOrange, LightBlue, LightRed, LightGreen]
+    where colorList = [White, Black, Yellow, LightRed]
 
 allClueColors :: [ClueColor]
 allClueColors = mapMaybe mkClueColor allGameColors
-
-mkOtherColor ::  GameColor -> Maybe OtherColor
-mkOtherColor c | c `elem` colorList = Just (OtherColor c)
-               | otherwise = Nothing
-    where colorList = [Gray, DarkGreen]
 
 -- | For PalmTree, Statue, and Hut, the recursive Feature bottoms out in 
 -- | One of the terrain types: River, Mountain, Jungle, Beach
@@ -125,7 +175,7 @@ data TerrainHex = TerrainHex Bool Feature [TerrainToken]
 
 type ClueBoard = [(PlayerId, ClueCard)]
 
-type HexBoard = TokenSpace TerrainHex
+type HexBoard = CubeCoordinateTokens Int TerrainHex
 
 type Deck a = ([a], [a])
 
@@ -157,7 +207,37 @@ instance ToGameState GameState where
 
 newtype CensoredGameState = CensoredGameState GameState
     deriving stock (Show, Eq, Generic)
-    deriving newtype (FromJSON, ToJSON)
+    deriving newtype (ToJSON)
+
+mkCensoredGameState :: GameState -> PlayerId -> CensoredGameState
+mkCensoredGameState g viewerId =
+    CensoredGameState $
+        g
+            { players = map (censorPlayer viewerId) g.players
+            , clueDeck = censorClueDeck g.clueDeck
+            , treasureDeck = censorTreasureDeck g.treasureDeck
+            , raisingTreasure = censorRaisingTreasure <$> g.raisingTreasure
+            , seed = (0, 0)
+            }
+  where
+    censorPlayer viewId ps
+        | ps.player.playerId == viewId = ps
+        | otherwise =
+            ps
+                { clues = map (const HiddenClue) ps.clues
+                , viewingTreasures = map (const HiddenTreasure) ps.viewingTreasures
+                }
+
+    censorClueDeck (drawPile, discardPile) = (map (const HiddenClue) drawPile, discardPile)
+
+    censorTreasureDeck (drawPile, discardPile) =
+        (map (const HiddenTreasure) drawPile, discardPile)
+
+censorRaisingTreasure :: RaisingTreasureState -> RaisingTreasureState
+censorRaisingTreasure rt = rt
+    { rtTreasureChest = first (showDeckOpt (null rt.rtViewing)) rt.rtTreasureChest }
+    where   showDeckOpt True (t:rest) = t : map (const HiddenTreasure) rest
+            showDeckOpt _ d = map (const HiddenTreasure) d
 
 instance ToGameState CensoredGameState where
     toGameState :: CensoredGameState -> GameState

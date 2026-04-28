@@ -66,6 +66,9 @@ test-suite turn-engine-test
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     other-modules:    LibSpec
+                    , Game.Core.PrimitivesSpec
+                    , Game.Arbitrary
+                    , Game.CursedTreasure.Arbitrary
                     , Game.CursedTreasure.APISpec
     hs-source-dirs:   test
     build-depends:

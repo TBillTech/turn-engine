@@ -1,124 +1,220 @@
 module Game.CursedTreasure.APISpec where
 
-import qualified Data.Map.Strict as Map
 import Test.Hspec
+import Test.QuickCheck
 
-import Game.Core.Primitives (AdjacencyPolicy (NonAdjacency), TokenSpace (..))
-import Game.CursedTreasure.API (censorHiddenInfo)
+import Game.CursedTreasure.API (createNewGame, getGameSetupPlayers, mkCensoredGameState)
+import Game.CursedTreasure.Arbitrary ()
 import Game.CursedTreasure.Types
-    ( ClueObject(..)
-    , ClueCard (HiddenClue, WithinStepsOf)
-    , CensoredGameState (..)
-    , Feature (Ocean)
+    ( ClueCard (HiddenClue)
+    , CensoredGameState
     , GameState (..)
     , PlayerDescription (..)
-    , PlayerId (..)
+    , PlayerId
     , PlayerState (..)
     , RaisingTreasureState (..)
-    , Score (CurrentScore)
-    , TreasureCard (Curse, HiddenTreasure, Treasure)
-    , allPlayerColors
+    , ToGameState (toGameState)
+    , TreasureCard (HiddenTreasure)
+    , censorRaisingTreasure
+    , mkPlayerId
     )
 
 spec :: Spec
 spec = do
+    describe "mkPlayerId" $ do
+        it "accepts only player ids from 1 through 4" $ do
+            map mkPlayerId [0 .. 5]
+                `shouldBe`
+                [ Nothing
+                , mkPlayerId 1
+                , mkPlayerId 2
+                , mkPlayerId 3
+                , mkPlayerId 4
+                , Nothing
+                ]
+
+    describe "createNewGame" $ do
+        it "creates a GameState with the requested number of players for seed 12345" $ do
+            assertCreateNewGamePlayerCount 3 12345
+
+        it "creates a GameState with the requested number of players for arbitrary seeds" $
+            property $ forAll validPlayerCountGen $ \playerCount ->
+                forAll arbitrary $ \randomSeed ->
+                    counterexample (seedCounterexample playerCount randomSeed) $
+                        createNewGamePlayerCountMatches playerCount randomSeed
+
+        it "returns one censored state per player for seed 12345" $ do
+            assertCreateNewGameCensoredCount 4 12345
+
+        it "returns one censored state per player for arbitrary seeds" $
+            property $ forAll validPlayerCountGen $ \playerCount ->
+                forAll arbitrary $ \randomSeed ->
+                    counterexample (seedCounterexample playerCount randomSeed) $
+                        createNewGameCensoredCountMatches playerCount randomSeed
+
+        it "returns censored states in the same player id order as the created players for seed 12345" $ do
+            assertCreateNewGameCensoredOrder 2 12345
+
+        it "returns censored states in the same player id order as the created players for arbitrary seeds" $
+            property $ forAll validPlayerCountGen $ \playerCount ->
+                forAll arbitrary $ \randomSeed ->
+                    counterexample (seedCounterexample playerCount randomSeed) $
+                        createNewGameCensoredOrderMatches playerCount randomSeed
+
+    describe "censorRaisingTreasure" $ do
+        it "keeps the top treasure visible and hides the rest when nobody is viewing" $
+            property $ \drawPile discardPile ->
+                let raisingTreasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = (drawPile, discardPile)
+                            , rtOrder = []
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    censoredDrawPile = fst (censorRaisingTreasure raisingTreasureState).rtTreasureChest
+                 in counterexample ("drawPile=" <> show drawPile) $
+                        censoredDrawPile === censorVisibleTopOnly drawPile
+
+        it "hides the full draw pile while treasure cards are being viewed" $
+            property $ \drawPile discardPile ->
+                let raisingTreasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = (drawPile, discardPile)
+                            , rtOrder = []
+                            , rtPlayerIndex = 0
+                            , rtViewing = [mkExistingPlayerId 1]
+                            }
+                    censoredDrawPile = fst (censorRaisingTreasure raisingTreasureState).rtTreasureChest
+                 in counterexample ("drawPile=" <> show drawPile) $
+                        censoredDrawPile === map (const HiddenTreasure) drawPile
+
     describe "censorHiddenInfo" $ do
-        it "hides other players info, deck draw piles, and raising treasure chest" $ do
-            let viewerId = PlayerId 1
-                otherId = PlayerId 2
+        it "preserves all non-censored data" $
+            property $ \viewerId gameState ->
+                let censoredState = toGameState $ mkCensoredGameState gameState viewerId
+                 in truncateCensoredFields viewerId censoredState
+                        === truncateCensoredFields viewerId gameState
 
-                (viewerColor, otherColor) =
-                    case allPlayerColors of
-                        (c1 : c2 : _) -> (c1, c2)
-                        _ -> error "APISpec requires at least two player colors"
+        it "replaces every censored field with hidden values" $
+            property $ \viewerId gameState ->
+                let censoredState = toGameState $ mkCensoredGameState gameState viewerId
+                 in conjoin
+                        [ counterexample "other players' clues must be hidden"
+                            (all (playerFieldsHidden viewerId) censoredState.players)
+                        , counterexample "clue draw pile must be hidden"
+                            (all (== HiddenClue) (fst censoredState.clueDeck))
+                        , counterexample "treasure draw pile must be hidden"
+                            (all (== HiddenTreasure) (fst censoredState.treasureDeck))
+                        , counterexample "raising treasure chest must be hidden"
+                            (maybe True raisingTreasureHidden censoredState.raisingTreasure)
+                        , counterexample "seed must be cleared"
+                            (censoredState.seed == (0, 0))
+                        ]
 
-                viewerDesc =
-                    PlayerDescription
-                        { playerId = viewerId
-                        , playerName = "Viewer"
-                        , playerAI = ""
-                        , playerColor = viewerColor
-                        }
+truncateCensoredFields :: PlayerId -> GameState -> GameState
+truncateCensoredFields viewerId gameState =
+    gameState
+        { players = map (truncateOther viewerId) gameState.players
+        , clueDeck = ([], snd gameState.clueDeck)
+        , treasureDeck = ([], snd gameState.treasureDeck)
+        , raisingTreasure = truncateRaisingTreasure <$> gameState.raisingTreasure
+        , seed = (0, 0)
+        }
+  where
+    truncateOther viewId playerState
+        | playerState.player.playerId == viewId = playerState
+        | otherwise =
+            playerState
+                { clues = []
+                , viewingTreasures = []
+                }
 
-                otherDesc =
-                    PlayerDescription
-                        { playerId = otherId
-                        , playerName = "Other"
-                        , playerAI = ""
-                        , playerColor = otherColor
-                        }
+    truncateRaisingTreasure raisingTreasureState =
+        raisingTreasureState
+            { rtTreasureChest = (truncateRaisingTreasureDrawPile raisingTreasureState, snd raisingTreasureState.rtTreasureChest)
+            }
 
-                viewerClues = [WithinStepsOf 2 $ FeatureClue True Ocean]
-                otherClues = [WithinStepsOf 3 $ FeatureClue True Ocean, WithinStepsOf 4 $ FeatureClue True Ocean]
+    truncateRaisingTreasureDrawPile raisingTreasureState =
+        if null raisingTreasureState.rtViewing
+            then take 1 drawPile
+            else []
+      where
+        (drawPile, _) = raisingTreasureState.rtTreasureChest
 
-                viewerTreasures = [Treasure 1, Curse]
-                otherTreasures = [Curse, Treasure 2]
+playerFieldsHidden :: PlayerId -> PlayerState -> Bool
+playerFieldsHidden viewerId playerState
+    | playerState.player.playerId == viewerId = True
+    | otherwise =
+        all (== HiddenClue) playerState.clues
+            && all (== HiddenTreasure) playerState.viewingTreasures
 
-                mkPlayerState :: PlayerDescription -> [ClueCard] -> [TreasureCard] -> PlayerState
-                mkPlayerState p cs ts =
-                    PlayerState
-                        { player = p
-                        , clues = cs
-                        , amulets = 0
-                        , foundTreasures = []
-                        , availableJeepMoves = 0
-                        , availableCluePlays = 0
-                        , availableRemoveMarkers = 0
-                        , availablePickupAmulet = 0
-                        , availableClueCardExchange = 0
-                        , score = CurrentScore 0
-                        , viewingTreasures = ts
-                        }
+raisingTreasureHidden :: RaisingTreasureState -> Bool
+raisingTreasureHidden raisingTreasureState 
+    | null raisingTreasureState.rtViewing = notElem HiddenTreasure (take 1 drawPile) && all (== HiddenTreasure) (drop 1 drawPile)
+    | otherwise = all (== HiddenTreasure) drawPile
+  where
+    (drawPile, _) = raisingTreasureState.rtTreasureChest
 
-                terrainBoard = TokenSpace {adjacency = NonAdjacency, tokens = Map.empty}
+validPlayerCountGen :: Gen Int
+validPlayerCountGen = elements [2, 3, 4]
 
-                g =
-                    GameState
-                        { players =
-                            [ mkPlayerState viewerDesc viewerClues viewerTreasures
-                            , mkPlayerState otherDesc otherClues otherTreasures
-                            ]
-                        , turn = 0
-                        , playerTurn = viewerId
-                        , activePlayer = viewerId
-                        , clueDeck = ([WithinStepsOf 1 $ FeatureClue True Ocean, WithinStepsOf 2 $ FeatureClue True Ocean], [WithinStepsOf 9 $ FeatureClue True Ocean])
-                        , treasureDeck = ([Treasure 9, Curse], [Treasure 99])
-                        , terrainBoard = terrainBoard
-                        , treasureBoards = []
-                        , raisingTreasure =
-                            Just
-                                RaisingTreasureState
-                                    { rtTreasureChest = ([Treasure 7, Curse], [])
-                                    , rtOrder = [viewerId, otherId]
-                                    , rtPlayerIndex = 0
-                                    , rtViewing = []
-                                    }
-                        , latestMessage = ""
-                        , gameOver = False
-                        , seed = (0, 0)
-                        }
+seedCounterexample :: Int -> Int -> String
+seedCounterexample playerCount randomSeed =
+    "playerCount=" <> show playerCount <> ", seed=" <> show randomSeed
 
-                CensoredGameState g' = censorHiddenInfo g viewerId
+mkExistingPlayerId :: Int -> PlayerId
+mkExistingPlayerId playerNumber =
+    case mkPlayerId playerNumber of
+        Just playerId -> playerId
+        Nothing -> error $ "Expected valid player id, got " <> show playerNumber
 
-            -- viewer's private info unchanged
-            (g'.players !!? 0 <&> (.clues)) `shouldBe` Just viewerClues
-            (g'.players !!? 0 <&> (.viewingTreasures)) `shouldBe` Just viewerTreasures
+createNewGamePlayerCountMatches :: Int -> Int -> Bool
+createNewGamePlayerCountMatches playerCount randomSeed =
+    length gameState.players == length requestedPlayers
+  where
+    requestedPlayers = take playerCount getGameSetupPlayers
+    (gameState, _) = createNewGame requestedPlayers randomSeed
 
-            -- other player's private info hidden (same lengths)
-            (g'.players !!? 1 <&> (.clues))
-                `shouldBe` Just (replicate (length otherClues) HiddenClue)
-            (g'.players !!? 1 <&> (.viewingTreasures))
-                `shouldBe` Just (replicate (length otherTreasures) HiddenTreasure)
+createNewGameCensoredCountMatches :: Int -> Int -> Bool
+createNewGameCensoredCountMatches playerCount randomSeed =
+    length censoredStates == length requestedPlayers
+  where
+    requestedPlayers = take playerCount getGameSetupPlayers
+    (_, censoredStates :: [CensoredGameState]) = createNewGame requestedPlayers randomSeed
 
-            -- draw piles hidden; discards unchanged
-            fst g'.clueDeck `shouldBe` replicate 2 HiddenClue
-            snd g'.clueDeck `shouldBe` [WithinStepsOf 9 $ FeatureClue True Ocean]
+createNewGameCensoredOrderMatches :: Int -> Int -> Bool
+createNewGameCensoredOrderMatches playerCount randomSeed =
+    all (== requestedPlayerIds) censoredPlayerIdLists
+  where
+    requestedPlayers = take playerCount getGameSetupPlayers
+    requestedPlayerIds = map (.playerId) requestedPlayers
+    (_, censoredStates) = createNewGame requestedPlayers randomSeed
+    censoredPlayerIdLists = map (map (.player.playerId) . (.players) . toGameState) censoredStates
 
-            fst g'.treasureDeck `shouldBe` replicate 2 HiddenTreasure
-            snd g'.treasureDeck `shouldBe` [Treasure 99]
+assertCreateNewGamePlayerCount :: Int -> Int -> Expectation
+assertCreateNewGamePlayerCount playerCount randomSeed =
+    assertSeededExpectation
+        (seedCounterexample playerCount randomSeed)
+        (createNewGamePlayerCountMatches playerCount randomSeed)
 
-            -- raising treasure chest hidden; rest unchanged
-            fmap (\rt -> rt.rtTreasureChest) g'.raisingTreasure
-                `shouldBe` Just ([Treasure 7, HiddenTreasure], [])
-            fmap (\rt -> rt.rtOrder) g'.raisingTreasure `shouldBe` Just [viewerId, otherId]
-            fmap (\rt -> rt.rtPlayerIndex) g'.raisingTreasure `shouldBe` Just 0
+assertCreateNewGameCensoredCount :: Int -> Int -> Expectation
+assertCreateNewGameCensoredCount playerCount randomSeed =
+    assertSeededExpectation
+        (seedCounterexample playerCount randomSeed)
+        (createNewGameCensoredCountMatches playerCount randomSeed)
+
+assertCreateNewGameCensoredOrder :: Int -> Int -> Expectation
+assertCreateNewGameCensoredOrder playerCount randomSeed =
+    assertSeededExpectation
+        (seedCounterexample playerCount randomSeed)
+        (createNewGameCensoredOrderMatches playerCount randomSeed)
+
+assertSeededExpectation :: String -> Bool -> Expectation
+assertSeededExpectation failureContext passed =
+    if passed
+        then pass
+        else expectationFailure failureContext
+
+censorVisibleTopOnly :: [TreasureCard] -> [TreasureCard]
+censorVisibleTopOnly [] = []
+censorVisibleTopOnly (topCard : rest) = topCard : map (const HiddenTreasure) rest

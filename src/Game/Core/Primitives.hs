@@ -1,5 +1,24 @@
 {-# LANGUAGE DerivingStrategies #-}
-module Game.Core.Primitives where
+module Game.Core.Primitives
+    ( GameColor (..)
+    , ToGameColor (..)
+    , allGameColors
+    , HourHand
+    , mkHourHand
+    , ToHourHand (..)
+    , FromHourHand (..)
+    , CubeCoordinate
+    , mkCubeCoordinate
+    , toPair
+    , CubeCoordinateTokens (..)
+    , adjacentCubeCoordinates
+    , isUnitCubeDist
+    , cubeCoordinateDistance
+    , toXYScaledOrientation
+    , radiusOneCubeCoordinates
+    , radiusTwoCubeCoordinates
+    )
+where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=), object, withObject)
 import qualified Data.Map.Strict as Map
@@ -24,7 +43,7 @@ instance ToGameColor GameColor where
     toGameColor = id
 
 allGameColors :: [GameColor]
-allGameColors = [minBound..maxBound]
+allGameColors = universe
 
 data TokenSpaceIndex = TokenSpaceTextIndex Text
     | TokenSpaceIntIndex Int
@@ -35,7 +54,19 @@ data TokenSpaceIndex = TokenSpaceTextIndex Text
 -- | HouryHand is an angle measured in units of pi/6, or 30 degrees, or clock hour hand
 newtype HourHand = HourHand Int
     deriving stock (Show, Eq, Ord, Generic)
-    deriving newtype (FromJSON, ToJSON)
+
+mkHourHand :: Int -> Maybe HourHand
+mkHourHand h
+    | h >= 0 && h <= 11 = Just (HourHand h)
+    | otherwise = Nothing
+
+instance ToJSON HourHand where
+    toJSON hh = toJSON (fromHourHand hh :: Int)
+
+instance FromJSON HourHand where
+    parseJSON value = do
+        h <- parseJSON value
+        maybe (fail "HourHand must be an integer between 0 and 11") pure (mkHourHand h)
 
 class ToHourHand a where
     toHourHand :: a -> HourHand
@@ -55,139 +86,121 @@ instance FromHourHand Int where
     fromHourHand :: HourHand -> Int
     fromHourHand (HourHand h) = h
 
-rawHorizontalHexOffsets :: Bool -> [((Int -> Int, Int -> Int), Int)]
-rawHorizontalHexOffsets True = [(((+1), (+1)), 1)
-                               ,(((+1), id), 3)
-                               ,(((+1), (+(-1))), 5)
-                               ,((id, (+(-1))), 7)
-                               ,(((+(-1)), id), 9)
-                               ,((id, (+1)), 11)]
-rawHorizontalHexOffsets False = [(((+ 1), id), 1)
-                                ,((id, (+1)), 3)
-                                ,(((+(-1)), id), 5)
-                                ,(((+(-1)), (+(-1))), 7)
-                                ,(((+(-1)), id), 9)
-                                ,(((+(-1)), (+1)), 11)]
-applyHorizontalHexOffsets :: TokenSpaceIndex -> [(TokenSpaceIndex, HourHand)]
-applyHorizontalHexOffsets (TokenSpace2DIndex i j) = map a $ rawHorizontalHexOffsets p
-    where p = even j
-          a ((f_i, f_j), h) = (TokenSpace2DIndex (f_i i) (f_j j), toHourHand h)
-applyHorizontalHexOffsets _ = []
+newtype ArrayOfTokens t = ArrayOfTokens (Map.Map Int t)
+    deriving stock (Show, Eq, Generic)
 
-rawVerticalHexOffsets :: (Num c1, Num c2) => Bool -> [((c1 -> c1, c2 -> c2), Int)]
-rawVerticalHexOffsets True = [((id, (+1)), 0)
-                             ,(((+1), id), 2)
-                             ,(((+1), (+(-1))), 4)
-                             ,((id, (+(-1))), 6)
-                             ,(((+(-1)), (+(-1))), 8)
-                             ,(((+(-1)), id), 10)]
-rawVerticalHexOffsets False = [((id, (+1)), 0)
-                              ,(((+1), (+1)), 2)
-                              ,(((+1), id), 4)
-                              ,((id, (+(-1))), 6)
-                              ,(((+(-1)), id), 8)
-                              ,(((+(-1)), (+1)), 10)]
-applyVerticalHexOffsets :: TokenSpaceIndex -> [(TokenSpaceIndex, HourHand)]
-applyVerticalHexOffsets (TokenSpace2DIndex i j) = map a $ rawVerticalHexOffsets p
-    where p = even i
-          a ((f_i, f_j), h) = (TokenSpace2DIndex (f_i i) (f_j j), toHourHand h)
-applyVerticalHexOffsets _ = []
+instance (ToJSON t) => ToJSON (ArrayOfTokens t) where
+    toJSON (ArrayOfTokens tokens) = toJSON (Map.toList tokens)
 
-adjacentIndices :: AdjacencyPolicy -> TokenSpaceIndex -> [TokenSpaceIndex]
-adjacentIndices NonAdjacency _ = []
-adjacentIndices _ (TokenSpaceTextIndex _) = []
-adjacentIndices _ (TokenSpaceIntIndex i) = [TokenSpaceIntIndex $ i-1, TokenSpaceIntIndex $ i+1]
-adjacentIndices IndexAdjacency (TokenSpace2DIndex i j)
-    = map (uncurry TokenSpace2DIndex) [(i,j+1), (i+1, j), (i, j-1), (i-1, j)]
-adjacentIndices HorizontalHexAdjacency ti = map fst $ applyHorizontalHexOffsets ti
-adjacentIndices VerticalHexAdjacency ti = map fst $ applyVerticalHexOffsets ti
+instance (FromJSON t) => FromJSON (ArrayOfTokens t) where
+    parseJSON value = ArrayOfTokens . Map.fromList <$> parseJSON value
 
-isAdjacentIndex :: AdjacencyPolicy -> TokenSpaceIndex -> TokenSpaceIndex -> Bool
-isAdjacentIndex p t1 t2 = t2 `elem` adjacentIndices p t1
+newtype RectilinearTokens t = RectilinearTokens (Map.Map (Int, Int) t)
+    deriving stock (Show, Eq, Generic)
 
-type QuadrupleSquares = (Int, Int)
+instance (ToJSON t) => ToJSON (RectilinearTokens t) where
+    toJSON (RectilinearTokens tokens) = toJSON (Map.toList tokens)
 
-policyTextDistance :: Text -> TokenSpaceIndex -> Maybe QuadrupleSquares
-policyTextDistance _ _ = Nothing
+instance (FromJSON t) => FromJSON (RectilinearTokens t) where
+    parseJSON value = RectilinearTokens . Map.fromList <$> parseJSON value
 
-policyIndexDistance :: TokenSpaceIndex -> TokenSpaceIndex -> Maybe QuadrupleSquares
-policyIndexDistance (TokenSpaceTextIndex t) b = policyTextDistance t b
-policyIndexDistance a (TokenSpaceTextIndex t) = policyTextDistance t a
-policyIndexDistance (TokenSpaceIntIndex i) (TokenSpaceIntIndex j) = Just (4*(i-j)*(i-j), 0)
-policyIndexDistance (TokenSpaceIntIndex i_a) (TokenSpace2DIndex i_b _)
-    = Just (4*(i_a-i_b)*(i_a-i_b), 0)
-policyIndexDistance (TokenSpace2DIndex _ j_a) (TokenSpaceIntIndex j_b)
-    = Just (0, 4*(j_a-j_b)*(j_a-j_b))
-policyIndexDistance (TokenSpace2DIndex i_a j_a) (TokenSpace2DIndex i_b j_b)
-    = Just (4*(i_a-i_b)*(i_a-i_b), 4*(j_a-j_b)*(j_a-j_b))
+-- | Cube-coordinate storage for a hex cell.
+-- |
+-- | The stored payload keeps the canonical axial pair @(q, r)@ and derives the
+-- | third cube coordinate as @s = -q-r@ whenever needed.
+newtype CubeCoordinate c = CubeCoordinate (c, c)
+    deriving stock (Show, Eq, Ord, Generic)
 
-policyHexDistance :: Bool -> TokenSpaceIndex -> TokenSpaceIndex -> Maybe QuadrupleSquares
-policyHexDistance _ (TokenSpaceTextIndex t) b = policyTextDistance t b
-policyHexDistance _ a (TokenSpaceTextIndex t) = policyTextDistance t a
-policyHexDistance _ a@(TokenSpaceIntIndex _) b@(TokenSpaceIntIndex _)
-    = policyIndexDistance a b
-policyHexDistance True a@(TokenSpaceIntIndex _) b@(TokenSpace2DIndex _ _)
-    = policyIndexDistance a b
-policyHexDistance False a@(TokenSpaceIntIndex _) b@(TokenSpace2DIndex _ _)
-    = scaleHorizontal $ policyIndexDistance a b
-    where scaleHorizontal Nothing = Nothing
-          scaleHorizontal (Just (isqr, jsqr)) = Just (3 * (isqr `div` 4), jsqr)
-policyHexDistance False a@(TokenSpace2DIndex _ _) b@(TokenSpaceIntIndex _)
-    = policyIndexDistance a b
-policyHexDistance True a@(TokenSpace2DIndex _ _) b@(TokenSpaceIntIndex _)
-    = scaleVertical $ policyIndexDistance a b
-    where scaleVertical Nothing = Nothing
-          scaleVertical (Just (isqr, jsqr)) = Just (isqr, 3 * (jsqr `div` 4))
-policyHexDistance True (TokenSpace2DIndex i_a j_a) (TokenSpace2DIndex i_b j_b)
-    | even j_a && even j_b = Just (4*(i_a-i_b)*(i_a-i_b), 3*(j_a-j_b)*(j_a-j_b))
-    | even j_a && odd j_b = Just ((2*i_a-2*i_b-1)*(2*i_a-2*i_b-1), 3*(j_a-j_b)*(j_a-j_b))
-    | odd j_a && even j_b = Just ((2*i_a-2*i_b+1)*(2*i_a-2*i_b+1), 3*(j_a-j_b)*(j_a-j_b))
-    | otherwise = Just (4*(i_a-i_b)*(i_a-i_b), 3*(j_a-j_b)*(j_a-j_b))
-policyHexDistance False (TokenSpace2DIndex i_a j_a) (TokenSpace2DIndex i_b j_b)
-    | even i_a && even i_b = Just (3*(i_a-i_b)*(i_a-i_b), 4*(j_a-j_b)*(j_a-j_b))
-    | even i_a && odd i_b = Just (3*(i_a-i_b)*(i_a-i_b), (2*j_a-2*j_b-1)*(2*j_a-2*j_b-1))
-    | odd i_a && even i_b = Just (3*(i_a-i_b)*(i_a-i_b), (2*j_a-2*j_b+1)*(2*j_a-2*j_b+1))
-    | otherwise = Just (3*(i_a-i_b)*(i_a-i_b), 4*(j_a-j_b)*(j_a-j_b))
+mkCubeCoordinate :: Num c => c -> c -> CubeCoordinate c
+mkCubeCoordinate q r = CubeCoordinate (q, r)
 
-policyFourSquareDistance :: AdjacencyPolicy -> TokenSpaceIndex -> TokenSpaceIndex -> Maybe QuadrupleSquares
-policyFourSquareDistance NonAdjacency _ _ = Nothing
-policyFourSquareDistance IndexAdjacency a b = policyIndexDistance a b
-policyFourSquareDistance HorizontalHexAdjacency a b = policyHexDistance True a b
-policyFourSquareDistance VerticalHexAdjacency a b = policyHexDistance False a b
+toPair :: Num c => CubeCoordinate c -> (c, c)
+toPair (CubeCoordinate p) = p
 
+instance ToJSON c => ToJSON (CubeCoordinate c) where
+    toJSON (CubeCoordinate (q, r)) = toJSON (q, r)
 
--- | Defines how positions/tokens are considered adjacent.
--- | Index adjacency means along this dimension, N-1 is adjacent below to N which is adjecent below to N+1
--- | HorizontalHexAdjacency means cell (i, j) where i % 2 == 0 is adjacent 
--- | to cells (i+1, j+1), (i+1, j), (i+1, j-1), (i, j-1), (i-1, j), (i, j+1)
--- | i % 2 == 1 is adjacent to cells
--- | (i+1, j), (i, j+1), (i-1, j), (i-1, j-1), (i-1, j), (i-1, j+1)
--- | VerticalHexAdjacency means the same if you swap i and j
--- | (Not implemented) CompositeAdjacency means the first kind of adjacency indexes into the second kind
-data AdjacencyPolicy
-    = NonAdjacency
-    | IndexAdjacency
-    | HorizontalHexAdjacency
-    | VerticalHexAdjacency
---    | CompositeAdjacency AdjacencyPolicy AdjacencyPolicy
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+instance (FromJSON c, Num c) => FromJSON (CubeCoordinate c) where
+    parseJSON value = do
+        (q, r) <- parseJSON value
+        pure (mkCubeCoordinate q r)
 
--- | TokenSpace is annotated by an adjacency policy and contains tokens keyed by 'k'.
-data TokenSpace t = TokenSpace
-    { adjacency :: AdjacencyPolicy
-    , tokens :: Map.Map TokenSpaceIndex t
-    }
-    deriving (Show, Eq, Generic)
+data CubeCoordinateTokens c t = CubeCoordinateTokens HourHand (Map.Map (CubeCoordinate c) t)
+    deriving stock (Show, Eq, Generic)
 
-instance (ToJSON t) => ToJSON (TokenSpace t) where
-    toJSON ts =
+instance (ToJSON c, ToJSON t) => ToJSON (CubeCoordinateTokens c t) where
+    toJSON (CubeCoordinateTokens orientation tokens) =
         object
-            [ "adjacency" .= ts.adjacency
-            , "tokens" .= Map.toList ts.tokens
+            [ "orientation" .= orientation
+            , "tokens" .= Map.toList tokens
             ]
 
-instance (FromJSON t) => FromJSON (TokenSpace t) where
-    parseJSON = withObject "TokenSpace" $ \o -> do
-        adjacency <- o .: "adjacency"
+instance (FromJSON c, Num c, Ord c, FromJSON t) => FromJSON (CubeCoordinateTokens c t) where
+    parseJSON = withObject "CubeCoordinateTokens" $ \o -> do
+        orientation <- o .: "orientation"
         tokens <- Map.fromList <$> o .: "tokens"
-        pure TokenSpace {adjacency, tokens}
+        pure (CubeCoordinateTokens orientation tokens)
+
+-- | toXYScaledOrientation uses the HourHand orientation, scale, and a CubeCoordinate to 
+-- | compute the center of the Hex at CubeCoordinate as a rectilinear (X, Y) coordinate 
+-- | suitable, for example, placing a hex sprite on a screen.
+-- | This transform assumes that the center of the hex at CubeCoordinate (0, 0) is 
+-- | the same point as the rectilinear (0, 0) origin.
+-- | This transform further assumes that the coordinates CubeCoordinate (n, 0) where
+-- | n are integers and are the centers of hexes along a line in the direction of the HourHand 
+-- | (defined just like a clock with 12 oclock up/north), such that the hex centers are exactly
+-- | scale distance apart along this line, and that the pointy tops are perpendicular to this line.   
+toXYScaledOrientation :: Real c => HourHand -> Float -> CubeCoordinate c -> (Double, Double)
+toXYScaledOrientation (HourHand hour) scale (CubeCoordinate (q, r)) =
+    (q' * qx + r' * rx, q' * qy + r' * ry)
+    where
+        angle = pi / 2 - fromIntegral hour * pi / 6
+        scale' = realToFrac scale
+        q' = realToFrac q
+        r' = realToFrac r
+        qx = scale' * cos angle
+        qy = scale' * sin angle
+        rx = scale' * cos (angle + pi / 3)
+        ry = scale' * sin (angle + pi / 3)
+
+radiusOneCubeCoordinates :: Real c => [(c, c)]
+radiusOneCubeCoordinates =
+    [ (1, 0)
+    , (0, 1)
+    , (-1, 1)
+    , (-1, 0)
+    , (0, -1)
+    , (1, -1)
+    ]
+
+radiusTwoCubeCoordinates :: Real c => [(c, c)]
+radiusTwoCubeCoordinates =
+    [ (2, 0)
+    , (1, 1)
+    , (0, 2)
+    , (-1, 2)
+    , (-2, 2)
+    , (-2, 1)
+    , (-2, 0)
+    , (-1, -1)
+    , (0, -2)
+    , (1, -2)
+    , (2, -2)
+    , (2, -1)
+    ]
+
+adjacentCubeCoordinates :: Real c => CubeCoordinate c -> [CubeCoordinate c]
+adjacentCubeCoordinates (CubeCoordinate (q, r)) = uncurry mkCubeCoordinate . bimap (+q) (+r) 
+    <$> radiusOneCubeCoordinates
+
+cubeCoordinateDistance :: Real c => CubeCoordinate c -> CubeCoordinate c -> Double
+cubeCoordinateDistance (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) = 
+    sqrt (realToFrac $ dq*dq + dq*dr + dr*dr)
+    where   dq = q_a - q_b
+            dr = r_a - r_b
+
+isUnitCubeDist :: Real c => CubeCoordinate c -> CubeCoordinate c -> Bool
+isUnitCubeDist (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) =
+    dq*dq + dq*dr + dr*dr == 1
+    where   dq = q_a - q_b
+            dr = r_a - r_b
