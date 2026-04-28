@@ -19,6 +19,8 @@ module Game.CursedTreasure.Types
     , TerrainHex (..)
     , CubeCoordinate
     , ClueBoard
+    , HexMap
+    , HexSet
     , HexBoard
     , Deck
     , TreasureBoard
@@ -174,6 +176,10 @@ data TerrainHex = TerrainHex Bool Feature [TerrainToken]
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 type ClueBoard = [(PlayerId, ClueCard)]
+
+-- | Internal terrain-board map keyed by token-space index.
+type HexMap = Map (CubeCoordinate Int) TerrainHex
+type HexSet = Set (CubeCoordinate Int)
 
 type HexBoard = CubeCoordinateTokens Int TerrainHex
 

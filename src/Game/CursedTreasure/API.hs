@@ -36,6 +36,8 @@ import Game.CursedTreasure.Types
     , allPlayerColors
     , allClueColors
     , Score (..)
+    , HexMap
+    , HexSet
     , HexBoard
     , allFeatures
     , Deck
@@ -142,10 +144,6 @@ stackTreasure g = (twelve ++ bottom, g'')
     where (randomTreasures, g') = uniformShuffleList allTreasures g
           (twelve, rest) = splitAt 12 randomTreasures
           (bottom, g'') = uniformShuffleList (Curse:Curse:rest) g'
-
--- | Internal terrain-board map keyed by token-space index.
-type HexMap = Map (CubeCoordinate Int) TerrainHex
-type HexSet = Set (CubeCoordinate Int)
 
 -- | Returns all spaces within the requested expansion distance from the seed set.
 distanceSet :: Int -> HexSet -> HexSet
