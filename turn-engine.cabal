@@ -75,5 +75,6 @@ test-suite turn-engine-test
         turn-engine,
         hspec,
         hspec-discover,
-        QuickCheck
+        QuickCheck,
+        random
     build-tool-depends: hspec-discover:hspec-discover

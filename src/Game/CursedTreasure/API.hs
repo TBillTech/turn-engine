@@ -2,6 +2,10 @@ module Game.CursedTreasure.API
     ( getGameSetupPlayers
     , createNewGame
     , mkCensoredGameState
+    , distanceSet
+    , fillHexOcean
+    , getConnectedSets
+    , isValidTerrainBoard
     , enumerateActivePlayerOptions
     , makeMove
     )
