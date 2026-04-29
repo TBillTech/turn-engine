@@ -1,5 +1,38 @@
 module Game.CursedTreasure.APISpec where
 
+-- This spec aims, within reasonable limits, to build confidence that the
+-- functions in API.hs are logically correct, not merely that they return values
+-- of the expected types. The goal is to verify that the contents of each result
+-- carry the right game meaning.
+--
+-- That requires care around circular verification. We avoid relying on
+-- unverified API.hs functions to prove other API.hs functions correct. A ladder
+-- of verification is acceptable: once a function has been independently tested,
+-- using it to validate higher-level API behavior is fine, and often ideal.
+--
+-- The testing philosophy around errors is also intentionally narrow. Haskell is
+-- already doing substantial type-level work to prove the program is complete,
+-- and Relude helps eliminate many partial-function cases by construction. That
+-- means these tests usually do not need to independently verify that error
+-- conditions occur correctly. The emphasis is on happy-path correctness. The
+-- main exception is FromJSON failure behavior: decoding failures should be clear
+-- and explicit so API callers can understand what went wrong with JSON input.
+--
+-- It is also useful to keep the intended call flow in mind:
+-- 1. The caller obtains getGameSetupPlayers, fills in player information, and
+--    chooses the subset of players who will play.
+-- 2. The caller passes that updated and restricted player data to
+--    createNewGame, which returns the initial GameState plus one censored game
+--    state per player.
+-- 3. The caller then enters the main game loop.
+-- 4. The caller obtains enumerateActivePlayerOptions, presents those options to
+--    the active player, and records the chosen move.
+-- 5. The caller passes that move to makeMove, obtains a new GameState plus one
+--    censored game state per player, and repeats from step 4 until
+--    GameState.gameOver becomes True.
+-- 6. The caller presents the winners and any other relevant GameState
+--    information, and the game ends.
+
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Random (mkStdGen)
@@ -8,6 +41,7 @@ import Test.QuickCheck
 
 import Game.Core.Primitives
     ( CubeCoordinate
+    , CubeCoordinateTokens (CubeCoordinateTokens)
     , isUnitCubeDist
     , mkCubeCoordinate
     , radiusOneCubeCoordinates
@@ -15,13 +49,15 @@ import Game.Core.Primitives
     , toPair
     )
 import Game.CursedTreasure.API
-    ( createNewGame
+    ( createBoard
+    , createNewGame
     , distanceSet
     , fillHexOcean
     , getGameSetupPlayers
     , getConnectedSets
     , isValidTerrainBoard
     , mkCensoredGameState
+    , nextTurn
     )
 import Game.CursedTreasure.Arbitrary ()
 import Game.CursedTreasure.Types
@@ -29,11 +65,13 @@ import Game.CursedTreasure.Types
     , CensoredGameState
     , Feature (..)
     , GameState (..)
+    , HexBoard
     , HexMap
     , PlayerDescription (..)
     , PlayerId
     , PlayerState (..)
     , RaisingTreasureState (..)
+    , TerrainToken (..)
     , TerrainHex (..)
     , ToGameState (toGameState)
     , TreasureCard (HiddenTreasure)
@@ -107,8 +145,8 @@ spec = do
                     ]
 
     describe "fillHexOcean" $ do
-        it "wraps the bare canned board in two rings of ocean while preserving land" $ do
-            fst (fillHexOcean (bareBoard1.board, mkStdGen 0)) `shouldBe` filledBareBoard1.board
+        it "matches radius-2 oceanification for a rhombus while preserving land" $ do
+            fst (fillHexOcean (oceanifyTestLandBoard, mkStdGen 0)) `shouldBe` oceanifyBoard oceanifyTestLandBoard
 
     describe "canned boards" $ do
         it "tracks bare board #1 territories in getConnectedSets format" $ do
@@ -186,6 +224,96 @@ spec = do
                 forAll arbitrary $ \randomSeed ->
                     counterexample (seedCounterexample playerCount randomSeed) $
                         createNewGameCensoredOrderMatches playerCount randomSeed
+
+        it "deals 6 clues each in a 2-player game" $ do
+            let requestedPlayers = take 2 getGameSetupPlayers
+                (gameState, _) = createNewGame requestedPlayers 12345
+             in map (length . (.clues)) gameState.players `shouldBe` [6, 6]
+
+        it "deals 4 clues each in 3- and 4-player games" $ do
+            let players3 = take 3 getGameSetupPlayers
+                players4 = take 4 getGameSetupPlayers
+                (game3, _) = createNewGame players3 12345
+                (game4, _) = createNewGame players4 12345
+             in do
+                map (length . (.clues)) game3.players `shouldBe` [4, 4, 4]
+                map (length . (.clues)) game4.players `shouldBe` [4, 4, 4, 4]
+
+        it "starts turn 1 with the first listed player active and only that player funded" $ do
+            let requestedPlayers = take 3 getGameSetupPlayers
+                (gameState, _) = createNewGame requestedPlayers 12345
+                firstPlayerId =
+                    case requestedPlayers of
+                        firstPlayer : _ -> firstPlayer.playerId
+                        [] -> error "expected first player"
+             in do
+                gameState.turn `shouldBe` 1
+                gameState.playerTurn `shouldBe` firstPlayerId
+                gameState.activePlayer `shouldBe` firstPlayerId
+                map playerBudgets gameState.players `shouldBe`
+                    [ startTurnBudget
+                    , zeroTurnBudget
+                    , zeroTurnBudget
+                    ]
+
+        it "advances to the next player, increments turn, and refreshes only that player's budgets" $ do
+            let requestedPlayers = take 3 getGameSetupPlayers
+                (gameState, _) = createNewGame requestedPlayers 12345
+                nextGameState = nextTurn gameState
+                expectedSecondPlayerId =
+                    case requestedPlayers of
+                        _ : secondPlayer : _ -> secondPlayer.playerId
+                        _ -> error "expected second player"
+             in do
+                nextGameState.turn `shouldBe` 2
+                nextGameState.playerTurn `shouldBe` expectedSecondPlayerId
+                nextGameState.activePlayer `shouldBe` expectedSecondPlayerId
+                map playerBudgets nextGameState.players `shouldBe`
+                    [ zeroTurnBudget
+                    , startTurnBudget
+                    , zeroTurnBudget
+                    ]
+
+        it "maintains board token invariants across generated boards" $
+            property $ \randomSeed ->
+                let boardMap = terrainBoardMapFromBoard (createBoard (mkStdGen randomSeed))
+                 in counterexample ("seed=" <> show randomSeed) $
+                        conjoin
+                            [ countTokenLike isStatueToken boardMap >= 3
+                            , countTokenLike (== PalmTree) boardMap >= 3
+                            , countTokenLike (== Hut) boardMap >= 3
+                            , countTokenLike (== Amulet) boardMap == 0
+                            , countTokenLike isJeepToken boardMap == 0
+                            , countTokenLike isClueMarkerToken boardMap == 0
+                            , noAdjacentCopies isStatueToken boardMap
+                            , noAdjacentCopies (== PalmTree) boardMap
+                            , noAdjacentCopies (== Hut) boardMap
+                            ]
+
+    describe "isValidTerrainBoard" $ do
+        it "accepts the canned valid boards" $ do
+            isValidTerrainBoard filledBareBoard1.board `shouldBe` True
+            isValidTerrainBoard cannedBoard3.board `shouldBe` True
+            isValidTerrainBoard cannedBoard4.board `shouldBe` True
+
+        it "rejects boards missing ocean" $ do
+            isValidTerrainBoard boardMissingOcean `shouldBe` False
+
+        it "rejects tied largest territories for a feature" $ do
+            isValidTerrainBoard boardWithTiedLargestLagoon `shouldBe` False
+
+        it "rejects more than three territories for a non-ocean feature" $ do
+            isValidTerrainBoard boardWithTooManyRiverTerritories `shouldBe` False
+
+        it "rejects singleton territories for non-lagoon features" $ do
+            isValidTerrainBoard boardWithSingletonMountain `shouldBe` False
+
+        it "rejects more than two singleton lagoons" $ do
+            isValidTerrainBoard boardWithThreeSingletonLagoons `shouldBe` False
+
+        it "allows up to two singleton lagoons but not three" $ do
+            isValidTerrainBoard boardWithTwoSingletonLagoons `shouldBe` True
+            isValidTerrainBoard boardWithThreeSingletonLagoons `shouldBe` False
 
     describe "censorRaisingTreasure" $ do
         it "keeps the top treasure visible and hides the rest when nobody is viewing" $
@@ -446,6 +574,10 @@ testTerrainBoard4x4And3x3 =
         , (Beach, (4, 6), (0, 2))
         ]
 
+oceanifyTestLandBoard :: HexMap
+oceanifyTestLandBoard =
+    mkTerrainBlock Jungle (0, 1) (0, 1)
+
 bareBoard1 :: CannedBoard
 bareBoard1 = mkBareCannedBoard bareBoard1Specs
 
@@ -513,6 +645,8 @@ mkBareCannedBoard specs =
         , territories = territoriesFromSpecs specs
         }
 
+-- These canned fixtures may reuse fillHexOcean because fillHexOcean itself is
+-- independently verified above against the radius-2 oceanification oracle.
 fillOceanCannedBoard :: CannedBoard -> CannedBoard
 fillOceanCannedBoard canned =
     CannedBoard
@@ -521,6 +655,14 @@ fillOceanCannedBoard canned =
         }
   where
     oceanBoard = fst (fillHexOcean (canned.board, mkStdGen 0))
+
+oceanifyBoard :: HexMap -> HexMap
+oceanifyBoard landBoard =
+        Map.union landBoard oceanHexes
+    where
+        landCoords = Set.fromList (Map.keys landBoard)
+        oceanCoords = Set.difference (distanceSet 2 landCoords) landCoords
+        oceanHexes = Map.fromSet (const (TerrainHex True Ocean [])) oceanCoords
 
 territoriesFromSpecs :: [TerritorySpec] -> [(Feature, [HexMap])]
 territoriesFromSpecs specs = map territoriesForFeature orderedFeatures
@@ -594,3 +736,149 @@ territoriesTouch leftTerritory rightTerritory =
         | leftCoord <- Map.keys leftTerritory
         , rightCoord <- Map.keys rightTerritory
         ]
+
+playerBudgets :: PlayerState -> (Int, Int, Int, Int, Int)
+playerBudgets playerState =
+    ( playerState.availableJeepMoves
+    , playerState.availableCluePlays
+    , playerState.availableRemoveMarkers
+    , playerState.availablePickupAmulet
+    , playerState.availableClueCardExchange
+    )
+
+startTurnBudget :: (Int, Int, Int, Int, Int)
+startTurnBudget = (3, 1, 0, 1, 1)
+
+zeroTurnBudget :: (Int, Int, Int, Int, Int)
+zeroTurnBudget = (0, 0, 0, 0, 0)
+
+terrainBoardMap :: GameState -> HexMap
+terrainBoardMap gameState =
+    case gameState.terrainBoard of
+        CubeCoordinateTokens _ boardMap -> boardMap
+
+terrainBoardMapFromBoard :: HexBoard -> HexMap
+terrainBoardMapFromBoard hexBoard =
+    case hexBoard of
+        CubeCoordinateTokens _ boardMap -> boardMap
+
+boardMissingOcean :: HexMap
+boardMissingOcean = bareBoard1.board
+
+boardWithTiedLargestLagoon :: HexMap
+boardWithTiedLargestLagoon =
+    (fillOceanCannedBoard (mkBareCannedBoard tiedLargestLagoonSpecs)).board
+
+tiedLargestLagoonSpecs :: [TerritorySpec]
+tiedLargestLagoonSpecs =
+    [ (Lagoon, (0, 2), (0, 2))
+    , (Lagoon, (10, 12), (0, 2))
+    , (River, (20, 23), (0, 3))
+    , (River, (30, 32), (0, 2))
+    , (Mountain, (40, 43), (0, 3))
+    , (Mountain, (50, 52), (0, 2))
+    , (Jungle, (60, 63), (0, 3))
+    , (Jungle, (70, 72), (0, 2))
+    , (Beach, (80, 83), (0, 3))
+    , (Beach, (90, 92), (0, 2))
+    , (Meadow, (100, 103), (0, 3))
+    , (Meadow, (110, 112), (0, 2))
+    ]
+
+boardWithTooManyRiverTerritories :: HexMap
+boardWithTooManyRiverTerritories =
+    (fillOceanCannedBoard (mkBareCannedBoard tooManyRiverTerritoriesSpecs)).board
+
+tooManyRiverTerritoriesSpecs :: [TerritorySpec]
+tooManyRiverTerritoriesSpecs =
+    [ (Lagoon, (0, 3), (0, 3))
+    , (Lagoon, (10, 12), (0, 2))
+    , (River, (20, 23), (0, 3))
+    , (River, (30, 32), (0, 2))
+    , (River, (40, 42), (0, 2))
+    , (River, (50, 52), (0, 2))
+    , (Mountain, (60, 63), (0, 3))
+    , (Mountain, (70, 72), (0, 2))
+    , (Jungle, (80, 83), (0, 3))
+    , (Jungle, (90, 92), (0, 2))
+    , (Beach, (100, 103), (0, 3))
+    , (Beach, (110, 112), (0, 2))
+    , (Meadow, (120, 123), (0, 3))
+    , (Meadow, (130, 132), (0, 2))
+    ]
+
+boardWithSingletonMountain :: HexMap
+boardWithSingletonMountain =
+    (fillOceanCannedBoard (mkBareCannedBoard singletonMountainSpecs)).board
+
+singletonMountainSpecs :: [TerritorySpec]
+singletonMountainSpecs =
+    [ (Lagoon, (0, 3), (0, 3))
+    , (Lagoon, (10, 12), (0, 2))
+    , (River, (20, 23), (0, 3))
+    , (River, (30, 32), (0, 2))
+    , (Mountain, (40, 40), (0, 0))
+    , (Mountain, (50, 53), (0, 3))
+    , (Jungle, (60, 63), (0, 3))
+    , (Jungle, (70, 72), (0, 2))
+    , (Beach, (80, 83), (0, 3))
+    , (Beach, (90, 92), (0, 2))
+    , (Meadow, (100, 103), (0, 3))
+    , (Meadow, (110, 112), (0, 2))
+    ]
+
+boardWithTwoSingletonLagoons :: HexMap
+boardWithTwoSingletonLagoons =
+    (fillOceanCannedBoard (mkBareCannedBoard twoSingletonLagoonSpecs)).board
+
+twoSingletonLagoonSpecs :: [TerritorySpec]
+twoSingletonLagoonSpecs =
+    [ (Lagoon, (0, 3), (0, 3))
+    , (Lagoon, (10, 10), (0, 0))
+    , (Lagoon, (20, 20), (0, 0))
+    , (River, (30, 33), (0, 3))
+    , (River, (40, 42), (0, 2))
+    , (Mountain, (50, 53), (0, 3))
+    , (Mountain, (60, 62), (0, 2))
+    , (Jungle, (70, 73), (0, 3))
+    , (Jungle, (80, 82), (0, 2))
+    , (Beach, (90, 93), (0, 3))
+    , (Beach, (100, 102), (0, 2))
+    , (Meadow, (110, 113), (0, 3))
+    , (Meadow, (120, 122), (0, 2))
+    ]
+
+boardWithThreeSingletonLagoons :: HexMap
+boardWithThreeSingletonLagoons =
+    (fillOceanCannedBoard (mkBareCannedBoard threeSingletonLagoonSpecs)).board
+
+threeSingletonLagoonSpecs :: [TerritorySpec]
+threeSingletonLagoonSpecs =
+    twoSingletonLagoonSpecs <> [(Lagoon, (130, 130), (0, 0))]
+
+countTokenLike :: (TerrainToken -> Bool) -> HexMap -> Int
+countTokenLike matches =
+    length . filter matches . concatMap (\(TerrainHex _ _ tokens) -> tokens) . Map.elems
+
+noAdjacentCopies :: (TerrainToken -> Bool) -> HexMap -> Bool
+noAdjacentCopies matches boardMap = all notAdjacent tokenCoords
+  where
+    tokenCoords =
+        [ coord
+        | (coord, TerrainHex _ _ tokens) <- Map.toList boardMap
+        , any matches tokens
+        ]
+    notAdjacent coord =
+        all (not . isUnitCubeDist coord) (filter (/= coord) tokenCoords)
+
+isStatueToken :: TerrainToken -> Bool
+isStatueToken (Statue _) = True
+isStatueToken _ = False
+
+isJeepToken :: TerrainToken -> Bool
+isJeepToken (PlayerJeep _) = True
+isJeepToken _ = False
+
+isClueMarkerToken :: TerrainToken -> Bool
+isClueMarkerToken (ClueToken _) = True
+isClueMarkerToken _ = False

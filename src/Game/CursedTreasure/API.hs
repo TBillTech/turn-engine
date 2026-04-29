@@ -1,13 +1,16 @@
 module Game.CursedTreasure.API
     ( getGameSetupPlayers
     , createNewGame
+    , enumerateActivePlayerOptions
+    , makeMove
+    -- Below are exported for use in testing, the above is the set of API functions.
     , mkCensoredGameState
     , distanceSet
     , fillHexOcean
     , getConnectedSets
     , isValidTerrainBoard
-    , enumerateActivePlayerOptions
-    , makeMove
+    , createBoard
+    , nextTurn
     )
 where
 
@@ -161,25 +164,31 @@ distanceSet dist existingIndexes = Set.unions $ getDistanceSets dist [existingIn
 
 -- | Places one terrain token while trying to keep copies of that token separated.
 addToken :: RandomGen g => Int -> TerrainToken -> (HexMap, g) -> (HexMap, g)
-addToken dist t (b, g) | null consideredSet = addToken (dist-1) t (b, g')
-                       | otherwise = (alter addIt candidateI b, g')
-    where   (i, g') = uniformR (0, length consideredSet -1) g
-            candidateI = Set.elemAt i consideredSet
-            possibleB = Map.filter possible b
-            consideredSet = (fromList . keys $ possibleB) `Set.difference` distSet
-            distSet = distanceSet dist existingIndexes
-            existingIndexes = fromList . keys $ Map.filter hasT b
-            hasT (TerrainHex _ _ ts) = toZeroStatue t `elem` map toZeroStatue ts
-            toZeroStatue (Statue _) = Statue $ toHourHand (0 :: Int)
-            toZeroStatue th = th
-            possible (TerrainHex _ f ts)  | (not . null) ts = False
-                                          | f == Ocean = False
-                                          | f == Lagoon = False
-                                          | f == Mountain = False
-                                          | t == PalmTree && f == Jungle = False
-                                          | otherwise = True
-            addIt (Just (TerrainHex isL f ts)) = Just $ TerrainHex isL f $ t:ts
-            addIt Nothing = Just $ TerrainHex False Meadow [t]
+addToken dist t (b, g)
+    | null possibleSet = (b, g)
+    | dist > 0 && null consideredSet = addToken (dist-1) t (b, g)
+    | otherwise = (alter addIt candidateI b, g')
+    where
+        (i, g') = uniformR (0, length candidateSet - 1) g
+        candidateSet = if dist > 0 && not (null consideredSet) then consideredSet else possibleSet
+        candidateI = Set.elemAt i candidateSet
+        possibleB = Map.filter possible b
+        possibleSet = fromList . keys $ possibleB
+        consideredSet = possibleSet `Set.difference` distSet
+        distSet = distanceSet dist existingIndexes
+        existingIndexes = fromList . keys $ Map.filter hasT b
+        hasT (TerrainHex _ _ ts) = toZeroStatue t `elem` map toZeroStatue ts
+        toZeroStatue (Statue _) = Statue $ toHourHand (0 :: Int)
+        toZeroStatue th = th
+        possible (TerrainHex _ f ts)
+            | (not . null) ts = False
+            | f == Ocean = False
+            | f == Lagoon = False
+            | f == Mountain = False
+            | t == PalmTree && f == Jungle = False
+            | otherwise = True
+        addIt (Just (TerrainHex isL f ts)) = Just $ TerrainHex isL f $ t : ts
+        addIt Nothing = Just $ TerrainHex False Meadow [t]
 
 -- | Repeats 'addToken' the requested number of times.
 addTokens :: RandomGen g => Int -> TerrainToken -> (HexMap, g) -> (HexMap, g)
@@ -247,17 +256,33 @@ getFeatureConnectedSets m f = (f, sortedMaps)
     where unsortedMaps = getSimplyConnectedSets $ Map.filter (\(TerrainHex _ f' _) -> f' == f) m
           sortedMaps = sortBy (\m1 m2 -> length m2 `compare` length m1) unsortedMaps
 
--- | Groups connected components for every terrain feature on the board.
+-- | Groups connected components for every terrain feature on the board, keeping Ocean _first_.
 getConnectedSets :: HexMap -> [(Feature, [HexMap])]
 getConnectedSets m = map (getFeatureConnectedSets m) allFeatures
 
--- | Checks the terrain layout invariant used by board generation.
+-- | Checks the terrain layout invariant used by board generation. Relies on the
+-- | results from getConnectedSets being in order from largest to smallest.
+-- | This function forbids territories of 1 or less except for Lagoon, which is allowed up to 2 of size 1.
 isValidTerrainBoard :: HexMap -> Bool
-isValidTerrainBoard m = all isValidFeature $ getConnectedSets m
-    where isValidFeature (Ocean, fs) = length fs == 1
-          isValidFeature (_, []) = False
-          isValidFeature (_, [fg0]) = not (null fg0)
-          isValidFeature (_, fg0:fg1:_) = length fg0 > length fg1
+isValidTerrainBoard m = all isValid sets && hasAllTerrains sets
+    where   sets = getConnectedSets m
+            hasLargest (Ocean, _) = True
+            hasLargest (_, [_]) = True
+            hasLargest (_, fg0:fg1:_) = length fg0 > length fg1
+            hasLargest _ = False    
+            hasEnough (Ocean, fs) = not (null fs)
+            hasEnough (_, fs) = 3 >= length fs
+            isValid sets = hasLargest sets && noDegenerates sets && hasEnough sets
+            noDegenerates (Lagoon, fs) = null (empties fs) && 2 >= length (singles fs)
+            noDegenerates (_, fs) = null $ filter ((1 >=) . length) fs
+            empties = filter null
+            singles = filter ((1 ==) . length)
+            hasAllTerrains sets =
+                length presentFeatures == length allFeatures
+                    && all (`elem` presentFeatures) allFeatures
+                where
+                    presentFeatures = map fst sets
+
 
 -- | Repairs disconnected ocean regions by converting isolated oceans into lagoons when possible.
 fillInTerrain :: RandomGen g => (HexMap, g) -> (Bool, (HexMap, g))
@@ -268,7 +293,7 @@ fillInTerrain (m, g) | contiguous = (True, (m, g))
           solved = isOcean && isValidTerrainBoard solution
           solution = toLagoon isolated m
           connectedSets = getConnectedSets m
-          mOcean = fst <$> uncons connectedSets
+          mOcean = fst <$> uncons (filter ((/= Ocean) . fst) connectedSets)
           isOcean = maybe False ((== Ocean) . fst) mOcean
           oceans = maybe [Map.empty] snd mOcean
           isolated = map (convertToLagoon <$>) $ drop 1 oceans
@@ -324,12 +349,14 @@ growTerrainSeeds (rule, sizes) tHex mg = grownG
             seedSets = zip sizes $ map one seeds
             grownG = foldr (growTerrainSeed rule tHex) withSeedsG seedSets
 
--- | Expands one seeded cluster according to the requested growth rule.
+-- | Expands one seeded cluster according to the requested growth rule. 
+-- | Growing no seeds returns a likewise empty map.
 growTerrainSeed :: RandomGen g => GrowthRule -> TerrainHex -> (Int, HexSet)
     -> (HexMap, g) -> (HexMap, g)
 growTerrainSeed RandomGrowth _ (0, _) mapG = mapG
 growTerrainSeed RandomGrowth tHex (i, territory) mapG
-    = growTerrainSeed RandomGrowth tHex (i-1, territory') mapG'
+    | null territoryBound = mapG
+    | otherwise = growTerrainSeed RandomGrowth tHex (i-1, territory') mapG'
     where   territoryBound = getBoundarySet (`notMember` fst mapG) territory
             (rI, g') = uniformR (0, length territoryBound - 1) $ snd mapG
             toAdd = Set.elemAt rI territoryBound
@@ -337,7 +364,8 @@ growTerrainSeed RandomGrowth tHex (i, territory) mapG
             mapG' = (insert toAdd tHex $ fst mapG, g')
 growTerrainSeed RiverGrowth _ (-1, _) mapG = mapG
 growTerrainSeed RiverGrowth tHex (i, territory) mapG
-    = growTerrainSeed RiverGrowth tHex (i-1, territory') mapG'
+    | null territoryBound = mapG
+    | otherwise = growTerrainSeed RiverGrowth tHex (i-1, territory') mapG'
     where   fullTerritoryBound = toList $ getBoundarySet (`notMember` fst mapG) territory
             distTo = cubeCoordinateDistance (mkCubeCoordinate 0 0)
             territoryDists = zip (map distTo fullTerritoryBound) fullTerritoryBound
@@ -351,7 +379,8 @@ growTerrainSeed RiverGrowth tHex (i, territory) mapG
             mapG' = (insert toAdd usedTHex $ fst mapG, g')
 growTerrainSeed CoastalGrowth _ (-1, _) mapG = mapG
 growTerrainSeed CoastalGrowth tHex (i, territory) mapG
-    = growTerrainSeed CoastalGrowth tHex (i-1, territory') mapG'
+    | null territoryBound = mapG
+    | otherwise = growTerrainSeed CoastalGrowth tHex (i-1, territory') mapG'
     where   fullTerritoryBound = getBoundarySet (`notMember` fst mapG) territory
             territoryBound = Set.filter keepEnds fullTerritoryBound
             keepEnds t  | length tIntersect > 1 = False
@@ -402,7 +431,7 @@ createBoard g | failed = createBoard $ snd filledTerrainBoardG
 createNewGameState :: [PlayerDescription] -> Int -> GameState
 createNewGameState playerDs randomSeed
     | not validColors = initState & messageL %~ const "Player Colors Invalid"
-    | length playerDs <= 2 = initState & messageL %~ const "Game must be played with at least 2 players"
+    | length playerDs < 2 = initState & messageL %~ const "Game must be played with at least 2 players"
     | otherwise = nextTurn . dealClues $ initState
     where   initState = GameState
                 { players = newPlayers
@@ -480,13 +509,12 @@ nextTurn gameState = assignPlayer mCurrentPlayer . setNotActive $ gameState
 
 -- | Finds the next player in seating order, wrapping around to the first player.
 nextPlayer :: PlayerId -> GameState -> PlayerId
-nextPlayer currentPlayer gameState = fromMaybe (fromMaybe currentPlayer mFirstPlayerId) mNext
-    where   (mFirstPlayerId, _, mNext) = foldr foldfn (Nothing, False, Nothing) gameState.players
-            isCurrent player = player.player.playerId == currentPlayer
-            foldfn _ finished@(_, _, Just _) = finished
-            foldfn player (Nothing, _, _) = (Just player.player.playerId, isCurrent player, Nothing)
-            foldfn player (Just fp, False, _) = (Just fp, isCurrent player, Nothing)
-            foldfn player (Just fp, True, _) = (Just fp, False, Just player.player.playerId)
+nextPlayer currentPlayer gameState =
+    case dropWhile (/= currentPlayer) playerIds of
+        _ : nextId : _ -> nextId
+        _ -> fromMaybe currentPlayer (viaNonEmpty head playerIds)
+    where
+        playerIds = map (.player.playerId) gameState.players
 
 -- | Clears all remaining per-turn actions for a player.
 setNotPlayerTurn :: PlayerState -> PlayerState
@@ -586,6 +614,9 @@ boardL :: Lens' GameState HexMap
 boardL = lens (\gameState -> case gameState.terrainBoard of
                     CubeCoordinateTokens _ tokens -> tokens)
     updateBoard
+
+gameOverL :: Lens' GameState Bool
+gameOverL = lens (.gameOver) (\gameState over -> gameState { gameOver = over})
 
 updateBoard :: GameState -> HexMap -> GameState
 updateBoard gS board = case gS.terrainBoard of
@@ -895,7 +926,7 @@ raiseTreasureFinished s =
             score player = player.amulets + 10 * sum (map toInt player.foundTreasures)
             scorePlayer player = player { score = CurrentScore $ score player}
             maxS = maybe 0 maximum1 $ nonEmpty (score <$> s.players)
-            checkGameWinner gS  | isNothing mCards = gS & playersL %~ (setWinner <$>)
+            checkGameWinner gS  | isNothing mCards = gS & playersL %~ (setWinner <$>) & gameOverL %~ const True
                                 | otherwise = gS
             setWinner player = player { score = if CurrentScore maxS == player.score
                                                 then WinnerScore maxS else player.score }
