@@ -262,22 +262,23 @@ getConnectedSets m = map (getFeatureConnectedSets m) allFeatures
 
 -- | Checks the terrain layout invariant used by board generation. Relies on the
 -- | results from getConnectedSets being in order from largest to smallest.
--- | This function forbids territories of 1 or less except for Lagoon, which is allowed up to 2 of size 1.
+-- | This function requires at least three territories for each non-ocean feature
+-- | and forbids territories of size 1 or less except for Lagoon, which is
+-- | allowed up to 2 singleton territories.
 isValidTerrainBoard :: HexMap -> Bool
-isValidTerrainBoard m = all isValid sets && hasAllTerrains sets
+isValidTerrainBoard m = all isValid sets && hasAllTerrains
     where   sets = getConnectedSets m
             hasLargest (Ocean, _) = True
             hasLargest (_, [_]) = True
             hasLargest (_, fg0:fg1:_) = length fg0 > length fg1
-            hasLargest _ = False    
+            hasLargest _ = False
             hasEnough (Ocean, fs) = not (null fs)
-            hasEnough (_, fs) = 3 >= length fs
-            isValid sets = hasLargest sets && noDegenerates sets && hasEnough sets
-            noDegenerates (Lagoon, fs) = null (empties fs) && 2 >= length (singles fs)
-            noDegenerates (_, fs) = null $ filter ((1 >=) . length) fs
-            empties = filter null
+            hasEnough (_, fs) = 3 <= length fs
+            isValid feature = hasLargest feature && noDegenerates feature && hasEnough feature
+            noDegenerates (Lagoon, fs) = not (any null fs) && 2 >= length (singles fs)
+            noDegenerates (_, fs) = not (any ((1 >=) . length) fs)
             singles = filter ((1 ==) . length)
-            hasAllTerrains sets =
+            hasAllTerrains =
                 length presentFeatures == length allFeatures
                     && all (`elem` presentFeatures) allFeatures
                 where

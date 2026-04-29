@@ -158,20 +158,32 @@ spec = do
         it "tracks board #2 territories after fillHexOcean" $ do
             getConnectedSets filledBareBoard1.board `shouldBe` filledBareBoard1.territories
 
-        it "makes board #2 valid once ocean is added" $ do
-            isValidTerrainBoard filledBareBoard1.board `shouldBe` True
+        it "keeps board #2 invalid because each non-ocean feature has only one territory" $ do
+            isValidTerrainBoard filledBareBoard1.board `shouldBe` False
 
-        it "tracks board #3 territories with one 3x3 and one 4x4 block per feature" $ do
-            getConnectedSets cannedBoard3.board `shouldBe` cannedBoard3.territories
+        it "tracks invalid board #3 territories with one 3x3 and one 4x4 block per feature" $ do
+            getConnectedSets invalidCannedBoard3.board `shouldBe` invalidCannedBoard3.territories
 
-        it "makes board #3 valid after fillHexOcean" $ do
-            isValidTerrainBoard cannedBoard3.board `shouldBe` True
+        it "keeps invalid board #3 invalid because each non-ocean feature has only two territories" $ do
+            isValidTerrainBoard invalidCannedBoard3.board `shouldBe` False
 
-        it "keeps the non-ocean territory graph connected on board #3" $ do
-            hasConnectedTerritoryGraph cannedBoard3 `shouldBe` True
+        it "keeps invalid board #3's non-ocean territory graph connected" $ do
+            hasConnectedTerritoryGraph invalidCannedBoard3 `shouldBe` True
 
-        it "keeps same-feature territories separated on board #3" $ do
-            sameFeatureTerritoriesSeparated cannedBoard3 `shouldBe` True
+        it "keeps same-feature territories separated on invalid board #3" $ do
+            sameFeatureTerritoriesSeparated invalidCannedBoard3 `shouldBe` True
+
+        it "tracks board #5 territories with one 2x2, 3x3, and 4x4 block per feature" $ do
+            getConnectedSets cannedBoard5.board `shouldBe` cannedBoard5.territories
+
+        it "makes board #5 valid after fillHexOcean" $ do
+            isValidTerrainBoard cannedBoard5.board `shouldBe` True
+
+        it "keeps the non-ocean territory graph connected on board #5" $ do
+            hasConnectedTerritoryGraph cannedBoard5 `shouldBe` True
+
+        it "keeps same-feature territories separated on board #5" $ do
+            sameFeatureTerritoriesSeparated cannedBoard5 `shouldBe` True
 
         it "tracks board #4 territories with one 3x3, 4x4, and 5x5 block per feature" $ do
             getConnectedSets cannedBoard4.board `shouldBe` cannedBoard4.territories
@@ -292,8 +304,7 @@ spec = do
 
     describe "isValidTerrainBoard" $ do
         it "accepts the canned valid boards" $ do
-            isValidTerrainBoard filledBareBoard1.board `shouldBe` True
-            isValidTerrainBoard cannedBoard3.board `shouldBe` True
+            isValidTerrainBoard cannedBoard5.board `shouldBe` True
             isValidTerrainBoard cannedBoard4.board `shouldBe` True
 
         it "rejects boards missing ocean" $ do
@@ -302,8 +313,8 @@ spec = do
         it "rejects tied largest territories for a feature" $ do
             isValidTerrainBoard boardWithTiedLargestLagoon `shouldBe` False
 
-        it "rejects more than three territories for a non-ocean feature" $ do
-            isValidTerrainBoard boardWithTooManyRiverTerritories `shouldBe` False
+        it "rejects fewer than three territories for a non-ocean feature" $ do
+            isValidTerrainBoard boardWithTooFewRiverTerritories `shouldBe` False
 
         it "rejects singleton territories for non-lagoon features" $ do
             isValidTerrainBoard boardWithSingletonMountain `shouldBe` False
@@ -584,11 +595,14 @@ bareBoard1 = mkBareCannedBoard bareBoard1Specs
 filledBareBoard1 :: CannedBoard
 filledBareBoard1 = fillOceanCannedBoard bareBoard1
 
-cannedBoard3 :: CannedBoard
-cannedBoard3 = fillOceanCannedBoard (mkBareCannedBoard board3Specs)
+invalidCannedBoard3 :: CannedBoard
+invalidCannedBoard3 = fillOceanCannedBoard (mkBareCannedBoard invalidBoard3Specs)
 
 cannedBoard4 :: CannedBoard
 cannedBoard4 = fillOceanCannedBoard (mkBareCannedBoard board4Specs)
+
+cannedBoard5 :: CannedBoard
+cannedBoard5 = fillOceanCannedBoard (mkBareCannedBoard board5Specs)
 
 bareBoard1Specs :: [TerritorySpec]
 bareBoard1Specs =
@@ -600,8 +614,8 @@ bareBoard1Specs =
     , (Meadow, (20, 21), (0, 1))
     ]
 
-board3Specs :: [TerritorySpec]
-board3Specs =
+invalidBoard3Specs :: [TerritorySpec]
+invalidBoard3Specs =
         [ (Lagoon, (0, 3), (0, 3))
         , (River, (4, 7), (0, 3))
         , (Mountain, (8, 11), (0, 3))
@@ -614,6 +628,28 @@ board3Specs =
         , (Jungle, (33, 35), (0, 2))
         , (Beach, (36, 38), (0, 2))
         , (Meadow, (39, 41), (0, 2))
+        ]
+
+board5Specs :: [TerritorySpec]
+board5Specs =
+        [ (Lagoon, (0, 3), (0, 3))
+        , (River, (4, 7), (0, 3))
+        , (Mountain, (8, 11), (0, 3))
+        , (Jungle, (12, 15), (0, 3))
+        , (Beach, (16, 19), (0, 3))
+        , (Meadow, (20, 23), (0, 3))
+        , (Lagoon, (24, 26), (0, 2))
+        , (River, (27, 29), (0, 2))
+        , (Mountain, (30, 32), (0, 2))
+        , (Jungle, (33, 35), (0, 2))
+        , (Beach, (36, 38), (0, 2))
+        , (Meadow, (39, 41), (0, 2))
+        , (Lagoon, (42, 43), (0, 1))
+        , (River, (44, 45), (0, 1))
+        , (Mountain, (46, 47), (0, 1))
+        , (Jungle, (48, 49), (0, 1))
+        , (Beach, (50, 51), (0, 1))
+        , (Meadow, (52, 53), (0, 1))
         ]
 
 board4Specs :: [TerritorySpec]
@@ -785,18 +821,16 @@ tiedLargestLagoonSpecs =
     , (Meadow, (110, 112), (0, 2))
     ]
 
-boardWithTooManyRiverTerritories :: HexMap
-boardWithTooManyRiverTerritories =
-    (fillOceanCannedBoard (mkBareCannedBoard tooManyRiverTerritoriesSpecs)).board
+boardWithTooFewRiverTerritories :: HexMap
+boardWithTooFewRiverTerritories =
+    (fillOceanCannedBoard (mkBareCannedBoard tooFewRiverTerritoriesSpecs)).board
 
-tooManyRiverTerritoriesSpecs :: [TerritorySpec]
-tooManyRiverTerritoriesSpecs =
+tooFewRiverTerritoriesSpecs :: [TerritorySpec]
+tooFewRiverTerritoriesSpecs =
     [ (Lagoon, (0, 3), (0, 3))
     , (Lagoon, (10, 12), (0, 2))
     , (River, (20, 23), (0, 3))
     , (River, (30, 32), (0, 2))
-    , (River, (40, 42), (0, 2))
-    , (River, (50, 52), (0, 2))
     , (Mountain, (60, 63), (0, 3))
     , (Mountain, (70, 72), (0, 2))
     , (Jungle, (80, 83), (0, 3))
@@ -838,14 +872,19 @@ twoSingletonLagoonSpecs =
     , (Lagoon, (20, 20), (0, 0))
     , (River, (30, 33), (0, 3))
     , (River, (40, 42), (0, 2))
-    , (Mountain, (50, 53), (0, 3))
-    , (Mountain, (60, 62), (0, 2))
-    , (Jungle, (70, 73), (0, 3))
-    , (Jungle, (80, 82), (0, 2))
-    , (Beach, (90, 93), (0, 3))
-    , (Beach, (100, 102), (0, 2))
-    , (Meadow, (110, 113), (0, 3))
-    , (Meadow, (120, 122), (0, 2))
+    , (River, (50, 52), (0, 2))
+    , (Mountain, (60, 63), (0, 3))
+    , (Mountain, (70, 72), (0, 2))
+    , (Mountain, (80, 82), (0, 2))
+    , (Jungle, (90, 93), (0, 3))
+    , (Jungle, (100, 102), (0, 2))
+    , (Jungle, (110, 112), (0, 2))
+    , (Beach, (120, 123), (0, 3))
+    , (Beach, (130, 132), (0, 2))
+    , (Beach, (140, 142), (0, 2))
+    , (Meadow, (150, 153), (0, 3))
+    , (Meadow, (160, 162), (0, 2))
+    , (Meadow, (170, 172), (0, 2))
     ]
 
 boardWithThreeSingletonLagoons :: HexMap
@@ -854,7 +893,7 @@ boardWithThreeSingletonLagoons =
 
 threeSingletonLagoonSpecs :: [TerritorySpec]
 threeSingletonLagoonSpecs =
-    twoSingletonLagoonSpecs <> [(Lagoon, (130, 130), (0, 0))]
+    twoSingletonLagoonSpecs <> [(Lagoon, (180, 180), (0, 0))]
 
 countTokenLike :: (TerrainToken -> Bool) -> HexMap -> Int
 countTokenLike matches =
