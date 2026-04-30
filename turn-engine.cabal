@@ -42,11 +42,15 @@ library
         Lib
         Game.Logic
         Game.Types
+        Game.Core.API
         Game.Core.Primitives
         Game.Core.Types
+        Game.ArtOfWar.API
         Game.CursedTreasure.API
         Game.CursedTreasure.Types
+        Game.FogOfBattle.API
         Game.FogOfBattle.Types
+        Game.RealEstate.API
         Game.ArtOfWar.Types
         Game.RealEstate.Types
     build-depends:
@@ -66,6 +70,7 @@ test-suite turn-engine-test
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     other-modules:    LibSpec
+                    , Game.Core.APISpec
                     , Game.Core.PrimitivesSpec
                     , Game.Arbitrary
                     , Game.CursedTreasure.Arbitrary
