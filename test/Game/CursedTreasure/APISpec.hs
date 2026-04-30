@@ -35,7 +35,7 @@ module Game.CursedTreasure.APISpec where
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import System.Random (mkStdGen)
+import System.Random (mkStdGen, uniformShuffleList)
 import Test.Hspec
 import Test.QuickCheck
 
@@ -46,35 +46,54 @@ import Game.Core.Primitives
     , mkCubeCoordinate
     , radiusOneCubeCoordinates
     , radiusTwoCubeCoordinates
+    , toHourHand
     , toPair
     )
 import Game.CursedTreasure.API
     ( createBoard
     , createNewGame
     , distanceSet
+    , applyClue
+    , enumeratePossibleJeepMoves
+    , enumeratePossibleCluePlays
+    , enumeratePlayerOptions
     , fillHexOcean
     , getGameSetupPlayers
     , getConnectedSets
+    , isRaisingTreasure
     , isValidTerrainBoard
+    , matchClueCard
+    , matchObject
     , mkCensoredGameState
     , nextTurn
+    , passTurnOption
+    , pickupAmuletCase
+    , useAmuletCase
+    , raiseTreasureCase
+    , raisingTreasureChoiceCase
+    , raisingTreasureViewCase
     )
 import Game.CursedTreasure.Arbitrary ()
 import Game.CursedTreasure.Types
-    ( ClueCard (HiddenClue)
+    ( ClueCard (..)
+    , ClueColor
+    , ClueObject (..)
     , CensoredGameState
     , Feature (..)
+    , GameMode (..)
     , GameState (..)
     , HexBoard
     , HexMap
     , PlayerDescription (..)
     , PlayerId
+    , PlayerMove (..)
     , PlayerState (..)
     , RaisingTreasureState (..)
     , TerrainToken (..)
     , TerrainHex (..)
     , ToGameState (toGameState)
-    , TreasureCard (HiddenTreasure)
+    , TreasureCard (..)
+    , allClueColors
     , censorRaisingTreasure
     , mkPlayerId
     )
@@ -210,6 +229,15 @@ spec = do
                 ]
 
     describe "createNewGame" $ do
+        it "uniformShuffleList preserves length and element multiplicities" $
+            property $ \(values :: [Int]) randomSeed ->
+                let (shuffledValues, _) = uniformShuffleList values (mkStdGen randomSeed)
+                 in counterexample ("seed=" <> show randomSeed <> ", values=" <> show values) $
+                        conjoin
+                            [ length shuffledValues === length values
+                            , elementCounts shuffledValues === elementCounts values
+                            ]
+
         it "creates a GameState with the requested number of players for seed 12345" $ do
             assertCreateNewGamePlayerCount 3 12345
 
@@ -353,6 +381,470 @@ spec = do
                  in counterexample ("drawPile=" <> show drawPile) $
                         censoredDrawPile === map (const HiddenTreasure) drawPile
 
+        describe "matchObject" $ do
+            it "matches largest-feature clues only on largest hexes of that feature" $ do
+                matchObject (FeatureClue True Meadow) origin (TerrainHex True Meadow []) `shouldBe` True
+                matchObject (FeatureClue True Meadow) origin (TerrainHex False Meadow []) `shouldBe` False
+                matchObject (FeatureClue True Meadow) origin (TerrainHex True Mountain []) `shouldBe` False
+                matchObject (FeatureClue False Lagoon) origin (TerrainHex False Lagoon []) `shouldBe` True
+                matchObject (FeatureClue False Lagoon) origin (TerrainHex False Meadow []) `shouldBe` False
+
+            it "matches token and statue clues from the token list" $ do
+                let tokens = [PlayerJeep activePlayerId, ClueToken firstClueColor, Hut, PalmTree]
+                matchObject (TokenClue Hut) origin (TerrainHex False Jungle tokens) `shouldBe` True
+                matchObject (TokenClue PalmTree) origin (TerrainHex False Jungle tokens) `shouldBe` True
+                matchObject (TokenClue (PlayerJeep activePlayerId)) origin (TerrainHex False Jungle tokens) `shouldBe` True
+                matchObject (TokenClue (ClueToken firstClueColor)) origin (TerrainHex False Jungle tokens) `shouldBe` True
+                matchObject (TokenClue Hut) origin (TerrainHex False Jungle []) `shouldBe` False
+                matchObject StatueClue origin (TerrainHex False Jungle [Statue (toHourHand (5 :: Int))]) `shouldBe` True
+                matchObject StatueClue origin (TerrainHex False Jungle [Hut]) `shouldBe` False
+
+        describe "matchClueCard" $ do
+            it "treats WithinStepsOf as nearby-object and not-on-current-hex" $ do
+                let board =
+                        Map.fromList
+                            [ (origin, TerrainHex False Meadow [])
+                            , (adjacentOrigin, TerrainHex False Jungle [Hut])
+                            ]
+                 in do
+                    matchClueCard board (WithinStepsOf 1 (TokenClue Hut)) origin (TerrainHex False Meadow []) `shouldBe` True
+                    matchClueCard board (WithinStepsOf 1 (TokenClue Hut)) adjacentOrigin (TerrainHex False Jungle [Hut]) `shouldBe` False
+
+            it "rejects NotWithinStepsOf when any matching object is in range" $ do
+                let board =
+                        Map.fromList
+                            [ (origin, TerrainHex False Meadow [])
+                            , (adjacentOrigin, TerrainHex False Jungle [Hut])
+                            ]
+                 in do
+                    matchClueCard board (NotWithinStepsOf 1 (TokenClue Hut)) origin (TerrainHex False Meadow []) `shouldBe` False
+                    matchClueCard board (NotWithinStepsOf 1 (TokenClue Hut)) farOrigin (TerrainHex False Beach []) `shouldBe` True
+
+            it "counts objects exactly two steps away for WithinStepsOf 2 and NotWithinStepsOf 2" $ do
+                let board =
+                        Map.fromList
+                            [ (origin, TerrainHex False Meadow [])
+                            , (twoStepOrigin, TerrainHex False Jungle [Hut])
+                            , (farOrigin, TerrainHex False Beach [])
+                            ]
+                 in do
+                    matchClueCard board (WithinStepsOf 2 (TokenClue Hut)) origin (TerrainHex False Meadow []) `shouldBe` True
+                    matchClueCard board (NotWithinStepsOf 2 (TokenClue Hut)) origin (TerrainHex False Meadow []) `shouldBe` False
+                    matchClueCard board (WithinStepsOf 2 (TokenClue Hut)) farOrigin (TerrainHex False Beach []) `shouldBe` True
+                    matchClueCard board (NotWithinStepsOf 2 (TokenClue Hut)) farBeyondOrigin (TerrainHex False Lagoon []) `shouldBe` True
+
+            it "delegates exact-match clue cards to matchObject" $ do
+                matchClueCard Map.empty (IsOn (FeatureClue False Jungle)) origin (TerrainHex False Jungle []) `shouldBe` True
+                matchClueCard Map.empty (IsNotOn (FeatureClue False Jungle)) origin (TerrainHex False Jungle []) `shouldBe` False
+
+        describe "applyClue" $ do
+            it "starts from all non-ocean hexes when no markers exist for that color" $ do
+                let board =
+                        Map.fromList
+                            [ (origin, TerrainHex False Meadow [])
+                            , (adjacentOrigin, TerrainHex False Jungle [Hut])
+                            , (farOrigin, TerrainHex True Ocean [])
+                            ]
+                    (beforeMarkers, afterMarkers) = applyClue board (firstClueColor, IsOn (FeatureClue False Jungle))
+                 in do
+                    Map.keys beforeMarkers `shouldMatchList` [origin, adjacentOrigin]
+                    Map.keys afterMarkers `shouldBe` [adjacentOrigin]
+
+            it "filters only the existing markers for that color when markers are already placed on a canned board" $ do
+                let jungleCoord = mkCubeCoordinate 15 0
+                    meadowCoord = mkCubeCoordinate 25 0
+                    board =
+                        Map.adjust addJungleMarker jungleCoord
+                            $ Map.adjust addMeadowMarker meadowCoord cannedBoard4.board
+                    addJungleMarker (TerrainHex isLargest feature tokens) =
+                        TerrainHex isLargest feature (ClueToken firstClueColor : Hut : tokens)
+                    addMeadowMarker (TerrainHex isLargest feature tokens) =
+                        TerrainHex isLargest feature (ClueToken firstClueColor : tokens)
+                    (beforeMarkers, afterMarkers) = applyClue board (firstClueColor, IsOn (TokenClue Hut))
+                 in do
+                    Map.keys beforeMarkers `shouldMatchList` [jungleCoord, meadowCoord]
+                    Map.keys afterMarkers `shouldBe` [jungleCoord]
+
+        describe "enumeratePossibleCluePlays" $ do
+            it "offers clue plays that strictly narrow a clue color's candidate set" $ do
+                let playerState =
+                        basePlayerState
+                            { clues = [IsOn (FeatureClue False Jungle)]
+                            , availableCluePlays = 1
+                            }
+                    gameState =
+                        gameStateWithBoard
+                            [ (origin, TerrainHex False Meadow [])
+                            , (adjacentOrigin, TerrainHex False Jungle [])
+                            ]
+                    (_, moves) = enumeratePossibleCluePlays playerState gameState (GameModeNominal, [PassTurn])
+                 in moves `shouldBe`
+                        (map (`PlayClue` IsOn (FeatureClue False Jungle)) (take 4 allClueColors) <> [PassTurn])
+
+            it "skips clue plays that would leave the candidate set unchanged or empty" $ do
+                let playerState =
+                        basePlayerState
+                            { clues = [IsOn (FeatureClue False Ocean), IsOn (FeatureClue False Meadow)]
+                            , availableCluePlays = 1
+                            }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [ClueToken firstClueColor])]
+                    (_, moves) = enumeratePossibleCluePlays playerState gameState (GameModeNominal, [PassTurn])
+                 in moves `shouldBe` [PassTurn]
+
+        describe "passTurnOption" $ do
+            it "adds PassTurn in nominal mode" $ do
+                passTurnOption (GameModeNominal, [ExchangeClueCards])
+                    `shouldBe` (GameModeNominal, [PassTurn, ExchangeClueCards])
+
+            it "leaves non-nominal modes unchanged" $ do
+                passTurnOption (GameModeMustMoveJeep, [ExchangeClueCards])
+                    `shouldBe` (GameModeMustMoveJeep, [ExchangeClueCards])
+
+        describe "pickupAmuletCase" $ do
+            it "adds PickupAmulet when the active jeep shares a hex with an amulet and pickup is available" $ do
+                let playerState = basePlayerState { availablePickupAmulet = 1 }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [PlayerJeep activePlayerId, Amulet])]
+                 in pickupAmuletCase playerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, [PickupAmulet, PassTurn])
+
+            it "does not add PickupAmulet when the player has no pickup action remaining" $ do
+                let playerState = basePlayerState { availablePickupAmulet = 0 }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [PlayerJeep activePlayerId, Amulet])]
+                 in pickupAmuletCase playerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, [PassTurn])
+
+            it "does not add PickupAmulet when the jeep is present but no amulet is on its hex" $ do
+                let playerState = basePlayerState { availablePickupAmulet = 1 }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [PlayerJeep activePlayerId, Hut])]
+                 in pickupAmuletCase playerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, [PassTurn])
+
+            it "does not add PickupAmulet when an amulet is present but the player's jeep is not on that hex" $ do
+                let playerState = basePlayerState { availablePickupAmulet = 1 }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [Amulet])]
+                 in pickupAmuletCase playerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, [PassTurn])
+
+        describe "useAmuletCase" $ do
+            it "adds amulet-powered substitutes for exhausted actions and duplicate clue markers" $ do
+                let playerState =
+                        basePlayerState
+                            { amulets = 1
+                            , clues = [IsOn (FeatureClue False Jungle)]
+                            , availableJeepMoves = 0
+                            , availableCluePlays = 0
+                            , availableClueCardExchange = 0
+                            }
+                    gameState =
+                        gameStateWithBoard
+                            [ (origin, TerrainHex False Meadow [ClueToken firstClueColor])
+                            , (adjacentOrigin, TerrainHex False Jungle [ClueToken firstClueColor])
+                            ]
+                    expectedMoves =
+                        [ UseAmuletIncrMove
+                        , UseAmuletExchangeCards
+                        , UseAmuletPlayClue firstClueColor (IsOn (FeatureClue False Jungle))
+                        , UseAmuletPlayClue secondClueColor (IsOn (FeatureClue False Jungle))
+                        , UseAmuletPlayClue thirdClueColor (IsOn (FeatureClue False Jungle))
+                        , UseAmuletPlayClue fourthClueColor (IsOn (FeatureClue False Jungle))
+                        , UseAmuletRemoveSiteMarker firstClueColor 0 0
+                        , UseAmuletRemoveSiteMarker firstClueColor 1 0
+                        , PassTurn
+                        ]
+                 in useAmuletCase playerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, expectedMoves)
+
+        describe "enumeratePlayerOptions" $ do
+            it "switches to treasure view mode and folds in only the raising-treasure view case when viewers remain" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = [activePlayerId]
+                            }
+                    playerState = basePlayerState { amulets = 1, availableJeepMoves = 0, availableCluePlays = 0 }
+                    gameState =
+                        (gameStateWithBoard [(origin, TerrainHex False Meadow [ClueToken firstClueColor])])
+                            { raisingTreasure = Just treasureState }
+                 in enumeratePlayerOptions playerState gameState
+                        `shouldBe` (GameModeRaisingTreasureView treasureState, [RaisingTreasurePass])
+
+            it "switches to treasure choice mode and folds in only the raising-treasure choice case when viewing is done" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse, Treasure 4], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    playerState = basePlayerState { amulets = 1, availableJeepMoves = 0, availableCluePlays = 0 }
+                    gameState =
+                        (gameStateWithBoard [(origin, TerrainHex False Meadow [ClueToken firstClueColor])])
+                            { raisingTreasure = Just treasureState }
+                 in enumeratePlayerOptions playerState gameState
+                        `shouldBe`
+                            ( GameModeRaisingTreasureChoice treasureState
+                            , [RaisingTreasureAcceptCurse, RaisingTreasureWardCurse]
+                            )
+
+            it "requires a jeep move and excludes PassTurn when the jeep is not on the board" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1, availableCluePlays = 1, amulets = 1 }
+                    boardHexes =
+                        [ (mkCubeCoordinate 0 0, TerrainHex False Meadow [])
+                        , (mkCubeCoordinate 1 0, TerrainHex False Jungle [ClueToken firstClueColor])
+                        , (mkCubeCoordinate 0 1, TerrainHex False Beach [])
+                        , (mkCubeCoordinate (-1) 0, TerrainHex True Ocean [])
+                        ]
+                    gameState = gameStateWithBoard boardHexes
+                    expectedMoves = [MoveJeep 0 0, MoveJeep 1 0, MoveJeep 0 1]
+                    (mode, moves) = enumeratePlayerOptions playerState gameState
+                 in do
+                    mode `shouldBe` GameModeMustMoveJeep
+                    moves `shouldMatchList` expectedMoves
+
+            it "stays in nominal mode and combines the nominal option builders when the jeep is on the board" $ do
+                let playerState =
+                        basePlayerState
+                            { amulets = 0
+                            , clues = []
+                            , availableJeepMoves = 1
+                            , availableCluePlays = 0
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    gameState =
+                        gameStateWithBoard
+                            [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId, Amulet, ClueToken firstClueColor])
+                            , (adjacentOrigin, TerrainHex False Jungle [])
+                            ]
+                    expectedMoves =
+                        [ PassTurn
+                        , PickupAmulet
+                        , RaiseTreasure firstClueColor
+                        , MoveJeep 0 0
+                        , MoveJeep 1 0
+                        ]
+                    (mode, moves) = enumeratePlayerOptions playerState gameState
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` expectedMoves
+
+        describe "enumeratePossibleJeepMoves" $ do
+            it "allows every non-ocean hex when the jeep is not on the board" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1 }
+                    boardHexes =
+                        [ (mkCubeCoordinate 0 0, TerrainHex False Meadow [])
+                        , (mkCubeCoordinate 1 0, TerrainHex False Jungle [])
+                        , (mkCubeCoordinate 0 1, TerrainHex False Beach [])
+                        , (mkCubeCoordinate (-1) 0, TerrainHex True Ocean [])
+                        ]
+                    gameState = gameStateWithBoard boardHexes
+                    expectedMoves = [MoveJeep 0 0, MoveJeep 1 0, MoveJeep 0 1]
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeMustMoveJeep
+                    moves `shouldMatchList` expectedMoves
+
+            it "offers exactly the jeep's territory when the jeep is not on a territory boundary" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1 }
+                    jeepCoord = mkCubeCoordinate 1 1
+                    territoryCoords = mkCoordinateBlock (0, 2) (0, 2)
+                    boardHexes =
+                        [ (coord, TerrainHex False Jungle tokens)
+                        | coord <- territoryCoords
+                        , let tokens = [PlayerJeep activePlayerId | coord == jeepCoord]
+                        ]
+                            <> [(mkCubeCoordinate (-1) 1, TerrainHex True Ocean [])]
+                    gameState = gameStateWithBoard boardHexes
+                    expectedMoves = map (uncurry MoveJeep . toPair) territoryCoords
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` expectedMoves
+
+            it "offers the jeep's territory plus adjacent non-ocean hexes when the jeep is on a territory boundary" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1 }
+                    jeepCoord = mkCubeCoordinate 1 1
+                    leftCoords = mkCoordinateBlock (0, 1) (0, 1)
+                    rightCoords = mkCoordinateBlock (2, 3) (0, 1)
+                    boardHexes =
+                        [ (coord, TerrainHex False Jungle tokens)
+                        | coord <- leftCoords
+                        , let tokens = [PlayerJeep activePlayerId | coord == jeepCoord]
+                        ]
+                            <> [ (coord, TerrainHex False Beach []) | coord <- rightCoords ]
+                            <> [(mkCubeCoordinate 1 2, TerrainHex True Ocean [])]
+                    gameState = gameStateWithBoard boardHexes
+                    expectedCoords =
+                        [ mkCubeCoordinate 0 0
+                        , mkCubeCoordinate 0 1
+                        , mkCubeCoordinate 1 0
+                        , mkCubeCoordinate 1 1
+                        , mkCubeCoordinate 2 0
+                        , mkCubeCoordinate 2 1
+                        ]
+                    expectedMoves = map (uncurry MoveJeep . toPair) expectedCoords
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` expectedMoves
+
+            it "on canned board #4 offers exactly the first territory when the jeep is fully inside it" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1 }
+                    jeepCoord = mkCubeCoordinate 2 2
+                    territoryCoords = mkCoordinateBlock (0, 4) (0, 4)
+                    gameState = gameStateWithHexMap (placeJeep activePlayerId jeepCoord cannedBoard4.board)
+                    expectedMoves = map (uncurry MoveJeep . toPair) territoryCoords
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` expectedMoves
+
+            it "on canned board #4 includes the adjacent territory when the jeep is on the first territory's interior boundary" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1 }
+                    jeepCoord = mkCubeCoordinate 4 2
+                    territoryCoords = mkCoordinateBlock (0, 4) (0, 4)
+                    expectedCoords = territoryCoords <> [mkCubeCoordinate 5 1, mkCubeCoordinate 5 2]
+                    gameState = gameStateWithHexMap (placeJeep activePlayerId jeepCoord cannedBoard4.board)
+                    expectedMoves = map (uncurry MoveJeep . toPair) expectedCoords
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` expectedMoves
+
+            it "on canned board #4 excludes ocean while still including the adjacent territory at a coastal boundary" $ do
+                let playerState = basePlayerState { availableJeepMoves = 1 }
+                    jeepCoord = mkCubeCoordinate 4 0
+                    territoryCoords = mkCoordinateBlock (0, 4) (0, 4)
+                    expectedCoords = territoryCoords <> [mkCubeCoordinate 5 0]
+                    gameState = gameStateWithHexMap (placeJeep activePlayerId jeepCoord cannedBoard4.board)
+                    expectedMoves = map (uncurry MoveJeep . toPair) expectedCoords
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` expectedMoves
+
+        describe "raiseTreasureCase" $ do
+            it "adds RaiseTreasure for colors whose marker appears exactly once on the board at the jeep hex" $ do
+                let gameState =
+                        gameStateWithBoard
+                            [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId, ClueToken firstClueColor])
+                            , (adjacentOrigin, TerrainHex False Jungle [])
+                            ]
+                 in raiseTreasureCase basePlayerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, [RaiseTreasure firstClueColor, PassTurn])
+
+            it "skips RaiseTreasure when the same clue color still has multiple board markers" $ do
+                let gameState =
+                        gameStateWithBoard
+                            [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId, ClueToken firstClueColor])
+                            , (adjacentOrigin, TerrainHex False Jungle [ClueToken firstClueColor])
+                            ]
+                 in raiseTreasureCase basePlayerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeNominal, [PassTurn])
+
+            it "adds RaiseTreasure for each unique-color marker on the jeep hex and skips colors with extra markers elsewhere" $ do
+                let gameState =
+                        gameStateWithBoard
+                            [ ( origin
+                              , TerrainHex
+                                    False
+                                    Meadow
+                                    [ PlayerJeep activePlayerId
+                                    , ClueToken firstClueColor
+                                    , ClueToken secondClueColor
+                                    , ClueToken thirdClueColor
+                                    ]
+                              )
+                            , (adjacentOrigin, TerrainHex False Jungle [ClueToken thirdClueColor])
+                            ]
+                 in raiseTreasureCase basePlayerState gameState (GameModeNominal, [PassTurn])
+                        `shouldBe`
+                            ( GameModeNominal
+                            , [ RaiseTreasure firstClueColor
+                              , RaiseTreasure secondClueColor
+                              , PassTurn
+                              ]
+                            )
+
+        describe "raisingTreasureChoiceCase" $ do
+            it "offers accept and ward choices for a curse when the chooser has an amulet" $ do
+                let playerState = basePlayerState { amulets = 1 }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse, Treasure 5], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                 in raisingTreasureChoiceCase playerState (GameModeRaisingTreasureChoice treasureState, [])
+                        `shouldBe` (GameModeRaisingTreasureChoice treasureState, [RaisingTreasureAcceptCurse, RaisingTreasureWardCurse])
+
+            it "offers pass and take choices for non-curse treasure" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4, Curse], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                 in raisingTreasureChoiceCase basePlayerState (GameModeRaisingTreasureChoice treasureState, [])
+                        `shouldBe` (GameModeRaisingTreasureChoice treasureState, [RaisingTreasurePass, RaisingTreasureTake])
+
+            it "offers only accept curse when the chooser has no amulet" $ do
+                let playerState = basePlayerState { amulets = 0 }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse, Treasure 5], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                 in raisingTreasureChoiceCase playerState (GameModeRaisingTreasureChoice treasureState, [])
+                        `shouldBe` (GameModeRaisingTreasureChoice treasureState, [RaisingTreasureAcceptCurse])
+
+        describe "raisingTreasureViewCase" $ do
+            it "restricts view mode to RaisingTreasurePass" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = [activePlayerId]
+                            }
+                 in raisingTreasureViewCase basePlayerState baseGameState (GameModeRaisingTreasureView treasureState, [])
+                        `shouldBe` (GameModeRaisingTreasureView treasureState, [RaisingTreasurePass])
+
+        describe "isRaisingTreasure" $ do
+            it "switches to treasure view mode while viewers remain" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = [activePlayerId]
+                            }
+                    gameState = baseGameState { raisingTreasure = Just treasureState }
+                 in isRaisingTreasure gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeRaisingTreasureView treasureState, [PassTurn])
+
+            it "switches to treasure choice mode once all viewers are done" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    gameState = baseGameState { raisingTreasure = Just treasureState }
+                 in isRaisingTreasure gameState (GameModeNominal, [PassTurn])
+                        `shouldBe` (GameModeRaisingTreasureChoice treasureState, [PassTurn])
+
+            it "leaves nominal mode unchanged when no treasure-raising sequence is active" $ do
+                isRaisingTreasure baseGameState (GameModeNominal, [PassTurn])
+                    `shouldBe` (GameModeNominal, [PassTurn])
+
     describe "censorHiddenInfo" $ do
         it "preserves all non-censored data" $
             property $ \viewerId gameState ->
@@ -433,6 +925,76 @@ mkExistingPlayerId playerNumber =
         Just playerId -> playerId
         Nothing -> error $ "Expected valid player id, got " <> show playerNumber
 
+activePlayerId :: PlayerId
+activePlayerId = mkExistingPlayerId 1
+
+firstClueColor :: ClueColor
+firstClueColor =
+    case allClueColors of
+        color : _ -> color
+        [] -> error "Expected at least one clue color"
+
+secondClueColor :: ClueColor
+secondClueColor =
+    case allClueColors of
+        _ : color : _ -> color
+        _ -> error "Expected at least two clue colors"
+
+thirdClueColor :: ClueColor
+thirdClueColor =
+    case allClueColors of
+        _ : _ : color : _ -> color
+        _ -> error "Expected at least three clue colors"
+
+fourthClueColor :: ClueColor
+fourthClueColor =
+    case allClueColors of
+        _ : _ : _ : color : _ -> color
+        _ -> error "Expected at least four clue colors"
+
+adjacentOrigin :: CubeCoordinate Int
+adjacentOrigin = mkCubeCoordinate 1 0
+
+twoStepOrigin :: CubeCoordinate Int
+twoStepOrigin = mkCubeCoordinate 2 0
+
+farOrigin :: CubeCoordinate Int
+farOrigin = mkCubeCoordinate 3 0
+
+farBeyondOrigin :: CubeCoordinate Int
+farBeyondOrigin = mkCubeCoordinate 5 0
+
+baseGameState :: GameState
+baseGameState = fst $ createNewGame (take 2 getGameSetupPlayers) 12345
+
+basePlayerState :: PlayerState
+basePlayerState =
+    case baseGameState.players of
+        playerState : _ -> playerState
+        [] -> error "Expected at least one player"
+
+gameStateWithBoard :: [(CubeCoordinate Int, TerrainHex)] -> GameState
+gameStateWithBoard hexes =
+    baseGameState
+        { terrainBoard = CubeCoordinateTokens (toHourHand (0 :: Int)) (Map.fromList hexes)
+        , activePlayer = activePlayerId
+        }
+
+gameStateWithHexMap :: HexMap -> GameState
+gameStateWithHexMap hexMap =
+    baseGameState
+        { terrainBoard = CubeCoordinateTokens (toHourHand (0 :: Int)) hexMap
+        , activePlayer = activePlayerId
+        }
+
+placeJeep :: PlayerId -> CubeCoordinate Int -> HexMap -> HexMap
+placeJeep playerId coord = Map.adjust addPlayerJeep coord
+  where
+    addPlayerJeep (TerrainHex isLargest feature tokens) =
+        TerrainHex isLargest feature (PlayerJeep playerId : filter (not . isPlayerJeep) tokens)
+    isPlayerJeep (PlayerJeep _) = True
+    isPlayerJeep _ = False
+
 createNewGamePlayerCountMatches :: Int -> Int -> Bool
 createNewGamePlayerCountMatches playerCount randomSeed =
     length gameState.players == length requestedPlayers
@@ -483,6 +1045,9 @@ assertSeededExpectation failureContext passed =
 censorVisibleTopOnly :: [TreasureCard] -> [TreasureCard]
 censorVisibleTopOnly [] = []
 censorVisibleTopOnly (topCard : rest) = topCard : map (const HiddenTreasure) rest
+
+elementCounts :: Ord a => [a] -> Map.Map a Int
+elementCounts = Map.fromListWith (+) . map (, 1)
 
 origin :: CubeCoordinate Int
 origin = mkCubeCoordinate 0 0

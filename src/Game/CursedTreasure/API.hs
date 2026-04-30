@@ -11,6 +11,19 @@ module Game.CursedTreasure.API
     , isValidTerrainBoard
     , createBoard
     , nextTurn
+    , passTurnOption
+    , pickupAmuletCase
+    , useAmuletCase
+    , raiseTreasureCase
+    , raisingTreasureChoiceCase
+    , raisingTreasureViewCase
+    , enumeratePossibleJeepMoves
+    , isRaisingTreasure
+    , matchObject
+    , matchClueCard
+    , applyClue
+    , enumeratePossibleCluePlays
+    , enumeratePlayerOptions
     )
 where
 
@@ -802,8 +815,11 @@ enumeratePossibleJeepMoves player gS (GameModeNominal, moves)
             jeepHex = findFirstToken (PlayerJeep player.player.playerId) (getHexMap gS.terrainBoard)
             oneLeg = case jeepHex of (Just (k, _)) -> toList $ legSet k
                                      Nothing -> []
-            legSet k = Set.unions $ distanceSet 1 (one k):
-                map (fromList . keys) (filter (member k) connectedSets)
+            legSet k = Set.intersection boardCoords $ Set.unions $ adjacentCoords : territorySets
+                where   adjacentCoords = distanceSet 1 (one k)
+                        territorySets = map (fromList . keys) (filter (member k) connectedSets)
+            boardCoords = fromList $ keys $ Map.filter isNonOceanHex (getHexMap gS.terrainBoard)
+            isNonOceanHex (TerrainHex _ feature _) = feature /= Ocean
             unconstrained = map fst $ filter ((\(TerrainHex _ f _) -> f /= Ocean) . snd) $
                 toPairs (getHexMap gS.terrainBoard)
             toMove coord = uncurry MoveJeep (toPair coord)
