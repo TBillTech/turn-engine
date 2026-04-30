@@ -24,6 +24,7 @@ module Game.CursedTreasure.API
     , applyClue
     , enumeratePossibleCluePlays
     , enumeratePlayerOptions
+    , makeMoveDirect
     )
 where
 
@@ -568,9 +569,12 @@ dealClueCardToPlayer gSeed (draw, discard) (Right pS)
 moveCards :: (Eq a, Show a, Eq b, Show b) => Int -> Maybe a -> (a -> b) -> [a] -> [b]
     -> Either Text ([a] -> [a], [b] -> [b])
 moveCards 0 _ _ _ _ = Right (id, id)
-moveCards n mSpecific convert from to = (uncurry bimap . bimap (.) (.) <$> eMoveCard)
-    <*> moveCards (n-1) mSpecific convert from to
-    where   eMoveCard = moveCard mSpecific convert from to
+moveCards n mSpecific convert from to = do
+    (fromUpd, toUpd) <- moveCard mSpecific convert from to
+    let nextFrom = fromUpd from
+        nextTo = toUpd to
+    (fromRest, toRest) <- moveCards (n-1) mSpecific convert nextFrom nextTo
+    pure (fromRest . fromUpd, toRest . toUpd)
 
 -- | Moves one card from a source list into a destination list.
 moveCard :: (Eq a, Show a, Eq b, Show b) => Maybe a -> (a -> b) -> [a] -> [b]
@@ -869,10 +873,11 @@ playClueAndUpdate color card pId gS = eVerifyCard <*> eUpdates
 -- | Deals several clue cards directly to a player, updating deck state and seed counters.
 dealCardsDirect :: Int -> PlayerId -> GameState -> GameState
 dealCardsDirect 0 _ gS = gS
-dealCardsDirect n pId gS = gS & dealCardsDirect (n-1) pId
-    & messageL %~ eDeckUpd & clueDeckL %~ deckUpd & playerL pId %~ psUpd & seedL %~ seedUpd
-    where   (eDeckUpd, deckUpd, psUpd, seedUpd) = _eitherUpdates3 $
-                dealClueCardToPlayer gS.seed gS.clueDeck (findPlayer pId gS)
+dealCardsDirect n pId gS =
+    currentState & messageL %~ eDeckUpd & clueDeckL %~ deckUpd & playerL pId %~ psUpd & seedL %~ seedUpd
+    where   currentState = dealCardsDirect (n-1) pId gS
+            (eDeckUpd, deckUpd, psUpd, seedUpd) = _eitherUpdates3 $
+                dealClueCardToPlayer currentState.seed currentState.clueDeck (findPlayer pId currentState)
 
 -- | Rewrites the token list at one board location when the index exists.
 alterTokenList :: ([TerrainToken] -> [TerrainToken]) -> Maybe (CubeCoordinate Int) -> HexMap -> HexMap
@@ -883,12 +888,13 @@ alterTokenList _ Nothing = id
 -- | Applies a clue play immediately, including replacement draw on success.
 playClueDirect :: ClueColor -> ClueCard -> GameState -> GameState
 playClueDirect color card gS =
-    gS  & dealCard & messageL %~ eUpd & boardL %~ markerUpd & playerL pId %~ playedCardUpd
-        & treasureL color %~ treasureBoardUpd
+    if isRight ePlayClueUpds then dealCardsDirect 1 pId updatedState else updatedState
     where   pId = gS.activePlayer
             ePlayClueUpds = playClueAndUpdate color card pId gS
             (eUpd, markerUpd, playedCardUpd, treasureBoardUpd) = _eitherUpdates3 ePlayClueUpds
-            dealCard = if isRight ePlayClueUpds then dealCardsDirect 1 pId else id
+            updatedState =
+                gS & messageL %~ eUpd & boardL %~ markerUpd & playerL pId %~ playedCardUpd
+                   & treasureL color %~ treasureBoardUpd
 
 -- | Moves the active player's jeep token to the requested board coordinates.
 moveJeepDirect :: Int -> Int -> GameState -> GameState
@@ -902,15 +908,16 @@ moveJeepDirect i j gS =
 -- | Discards the active player's clue hand and redraws four fresh clue cards.
 exchangeCardsDirect :: GameState -> GameState
 exchangeCardsDirect gS =
-    gS  & dealCards & messageL %~ errDiscardUpd & clueDeckL %~ clueUpd
-        & playerL pId %~ playerDiscardUpd
+    if isRight eDiscardUpds then dealCardsDirect 4 pId updatedState else updatedState
     where   pId = gS.activePlayer
-            dealCards = if isRight eDiscardUpds then dealCardsDirect 4 pId else id
             (errDiscardUpd, toDiscardUpd, playerCluesUpd) = _eitherUpdates2 eDiscardUpds
             clueUpd = second toDiscardUpd
             playerDiscardUpd player = player { clues = playerCluesUpd player.clues }
             ePlayer = findPlayer pId gS
             eDiscardUpds = moveCards 4 Nothing id (either (const []) (.clues) ePlayer) (snd gS.clueDeck)
+            updatedState =
+                gS & messageL %~ errDiscardUpd & clueDeckL %~ clueUpd
+                   & playerL pId %~ playerDiscardUpd
 
 -- | Deals one treasure card face-up into a player's temporary viewing area.
 dealTreasureCardDirect :: PlayerId -> GameState -> GameState

@@ -62,6 +62,7 @@ import Game.CursedTreasure.API
     , getConnectedSets
     , isRaisingTreasure
     , isValidTerrainBoard
+    , makeMoveDirect
     , matchClueCard
     , matchObject
     , mkCensoredGameState
@@ -76,6 +77,7 @@ import Game.CursedTreasure.API
 import Game.CursedTreasure.Arbitrary ()
 import Game.CursedTreasure.Types
     ( ClueCard (..)
+    , ClueBoard
     , ClueColor
     , ClueObject (..)
     , CensoredGameState
@@ -845,6 +847,356 @@ spec = do
                 isRaisingTreasure baseGameState (GameModeNominal, [PassTurn])
                     `shouldBe` (GameModeNominal, [PassTurn])
 
+        describe "makeMoveDirect" $ do
+            it "records PlayerMoveError text in the game message" $ do
+                let resultState = runMakeMoveDirect baseGameState (PlayerMoveError "forced error")
+                 in gameMessage resultState `shouldBe` "forced error" <> gameMessage baseGameState
+
+            it "advances turn state for PassTurn" $ do
+                runMakeMoveDirect baseGameState PassTurn `shouldBe` nextTurn baseGameState
+
+            it "plays a clue, narrows the board, and spends the turn budgets for PlayClue" $ do
+                let clueCard = IsOn (FeatureClue False Jungle)
+                    replacementCard = IsNotOn (FeatureClue False Lagoon)
+                    playerState =
+                        basePlayerState
+                            { clues = [clueCard]
+                            , availableJeepMoves = 3
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 2
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    boardHexes =
+                        [ (origin, TerrainHex False Jungle [])
+                        , (adjacentOrigin, TerrainHex False Meadow [])
+                        ]
+                    initialState =
+                        (gameStateWithBoard boardHexes)
+                            { players = playerState : drop 1 baseGameState.players
+                            , clueDeck = ([replacementCard], [])
+                            , treasureBoards = (firstClueColor, []) : drop 1 baseGameState.treasureBoards
+                            }
+                    resultState = runMakeMoveDirect initialState (PlayClue firstClueColor clueCard)
+                    resultPlayer = playerStateById activePlayerId resultState
+                 in do
+                    terrainBoardMap resultState `shouldBe` snd (applyClue (Map.fromList boardHexes) (firstClueColor, clueCard))
+                    resultPlayer.clues `shouldBe` [replacementCard]
+                    playerBudgets resultPlayer `shouldBe` (0, 0, 0, 1, 0)
+                    treasureBoardByColor firstClueColor resultState `shouldBe` [(activePlayerId, clueCard)]
+
+            it "moves the jeep and decrements only the move budget for MoveJeep" $ do
+                let jeepCoord = origin
+                    destination = adjacentOrigin
+                    playerState =
+                        basePlayerState
+                            { availableJeepMoves = 2
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 1
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    boardHexes =
+                        [ (jeepCoord, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (destination, TerrainHex False Jungle [])
+                        ]
+                    initialState = (gameStateWithBoard boardHexes) { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState (MoveJeep 1 0)
+                    resultPlayer = playerStateById activePlayerId resultState
+                 in do
+                    boardTokensAt jeepCoord resultState `shouldNotContain` [PlayerJeep activePlayerId]
+                    boardTokensAt destination resultState `shouldContain` [PlayerJeep activePlayerId]
+                    playerBudgets resultPlayer `shouldBe` (1, 0, 0, 1, 0)
+
+            it "discards and redraws four clues for ExchangeClueCards" $ do
+                let originalClues =
+                        [ IsOn (FeatureClue False Jungle)
+                        , IsOn (FeatureClue False Meadow)
+                        , IsNotOn (FeatureClue False Lagoon)
+                        , WithinStepsOf 1 (TokenClue Hut)
+                        ]
+                    drawnClues =
+                        [ IsOn (TokenClue Hut)
+                        , IsNotOn (TokenClue PalmTree)
+                        , WithinStepsOf 2 (FeatureClue False Beach)
+                        , NotWithinStepsOf 1 StatueClue
+                        ]
+                    playerState =
+                        basePlayerState
+                            { clues = originalClues
+                            , availableJeepMoves = 3
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 1
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    initialState =
+                        baseGameState
+                            { players = playerState : drop 1 baseGameState.players
+                            , clueDeck = (drawnClues, [])
+                            }
+                    resultState = runMakeMoveDirect initialState ExchangeClueCards
+                    resultPlayer = playerStateById activePlayerId resultState
+                take 4 resultPlayer.clues `shouldMatchList` drawnClues
+                playerBudgets resultPlayer `shouldBe` (0, 0, 0, 1, 0)
+
+            it "picks up an amulet and consumes the pickup action for PickupAmulet" $ do
+                let playerState = basePlayerState { amulets = 0, availablePickupAmulet = 1 }
+                    boardHexes = [(origin, TerrainHex False Meadow [PlayerJeep activePlayerId, Amulet])]
+                    initialState = (gameStateWithBoard boardHexes) { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState PickupAmulet
+                    resultPlayer = playerStateById activePlayerId resultState
+                resultPlayer.amulets `shouldBe` 1
+                resultPlayer.availablePickupAmulet `shouldBe` 0
+                boardTokensAt origin resultState `shouldNotContain` [Amulet]
+
+            it "records an error for PickupAmulet when the active player's jeep is missing" $ do
+                let initialState = gameStateWithBoard [(origin, TerrainHex False Meadow [Amulet])]
+                    resultState = runMakeMoveDirect initialState PickupAmulet
+                gameMessage resultState `shouldBe` "Could not find PlayerId 1 jeep." <> gameMessage initialState
+                boardTokensAt origin resultState `shouldContain` [Amulet]
+
+            it "adds three moves and spends one amulet for UseAmuletIncrMove" $ do
+                let playerState = basePlayerState { amulets = 2, availableJeepMoves = 1 }
+                    initialState = baseGameState { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState UseAmuletIncrMove
+                    resultPlayer = playerStateById activePlayerId resultState
+                resultPlayer.availableJeepMoves `shouldBe` 4
+                resultPlayer.amulets `shouldBe` 1
+
+            it "records an error for UseAmuletIncrMove when no amulets remain" $ do
+                let playerState = basePlayerState { amulets = 0, availableJeepMoves = 1 }
+                    initialState = baseGameState { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState UseAmuletIncrMove
+                gameMessage resultState `shouldBe` "Player has no remaining amulets" <> gameMessage initialState
+
+            it "plays a clue and spends one amulet for UseAmuletPlayClue" $ do
+                let clueCard = IsOn (FeatureClue False Jungle)
+                    playerState = basePlayerState { amulets = 2, clues = [clueCard], availableCluePlays = 0 }
+                    boardHexes =
+                        [ (origin, TerrainHex False Jungle [])
+                        , (adjacentOrigin, TerrainHex False Meadow [])
+                        ]
+                    initialState =
+                        (gameStateWithBoard boardHexes)
+                            { players = playerState : drop 1 baseGameState.players
+                            , clueDeck = ([IsNotOn (FeatureClue False Beach)], [])
+                            , treasureBoards = (firstClueColor, []) : drop 1 baseGameState.treasureBoards
+                            }
+                    resultState = runMakeMoveDirect initialState (UseAmuletPlayClue firstClueColor clueCard)
+                    resultPlayer = playerStateById activePlayerId resultState
+                resultPlayer.amulets `shouldBe` 1
+                terrainBoardMap resultState `shouldBe` snd (applyClue (Map.fromList boardHexes) (firstClueColor, clueCard))
+
+            it "exchanges clues and spends one amulet for UseAmuletExchangeCards" $ do
+                let originalClues =
+                        [ IsOn (FeatureClue False Jungle)
+                        , IsOn (FeatureClue False Meadow)
+                        , IsNotOn (FeatureClue False Lagoon)
+                        , WithinStepsOf 1 (TokenClue Hut)
+                        ]
+                    drawnClues =
+                        [ IsOn (TokenClue Hut)
+                        , IsNotOn (TokenClue PalmTree)
+                        , WithinStepsOf 2 (FeatureClue False Beach)
+                        , NotWithinStepsOf 1 StatueClue
+                        ]
+                    playerState = basePlayerState { amulets = 2, clues = originalClues, availableClueCardExchange = 0 }
+                    initialState =
+                        baseGameState
+                            { players = playerState : drop 1 baseGameState.players
+                            , clueDeck = (drawnClues, [])
+                            }
+                    resultState = runMakeMoveDirect initialState UseAmuletExchangeCards
+                    resultPlayer = playerStateById activePlayerId resultState
+                resultPlayer.amulets `shouldBe` 1
+                take 4 resultPlayer.clues `shouldMatchList` drawnClues
+
+            it "removes the chosen site marker and spends one amulet for UseAmuletRemoveSiteMarker" $ do
+                let playerState = basePlayerState { amulets = 2 }
+                    boardHexes =
+                        [ (origin, TerrainHex False Meadow [ClueToken firstClueColor, Hut])
+                        , (adjacentOrigin, TerrainHex False Jungle [ClueToken firstClueColor])
+                        ]
+                    initialState = (gameStateWithBoard boardHexes) { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState (UseAmuletRemoveSiteMarker firstClueColor 0 0)
+                    resultPlayer = playerStateById activePlayerId resultState
+                resultPlayer.amulets `shouldBe` 1
+                boardTokensAt origin resultState `shouldBe` [Hut]
+                boardTokensAt adjacentOrigin resultState `shouldBe` [ClueToken firstClueColor]
+
+            it "starts treasure raising, clears the clue color, and advances the round for RaiseTreasure" $ do
+                let secondPlayerId = mkExistingPlayerId 2
+                    boardHexes =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId, ClueToken firstClueColor, ClueToken secondClueColor])
+                        , (adjacentOrigin, TerrainHex False Jungle [ClueToken firstClueColor])
+                        ]
+                    initialState =
+                        (gameStateWithBoard boardHexes)
+                            { treasureDeck = ([Treasure 4, Treasure 7, Treasure 9], [Curse])
+                            , treasureBoards = (firstClueColor, [(secondPlayerId, IsOn (FeatureClue False Jungle))]) : drop 1 baseGameState.treasureBoards
+                            }
+                    resultState = runMakeMoveDirect initialState (RaiseTreasure firstClueColor)
+                    raisingState = raisingTreasureState resultState
+                raisingTreasureChest raisingState `shouldBe` ([Treasure 4], [])
+                raisingTreasureOrder raisingState `shouldBe` [activePlayerId, secondPlayerId]
+                raisingTreasureViewing raisingState `shouldBe` [activePlayerId, secondPlayerId]
+                treasureBoardByColor firstClueColor resultState `shouldBe` []
+                boardTokensAt origin resultState `shouldBe` [PlayerJeep activePlayerId, ClueToken secondClueColor]
+                boardTokensAt adjacentOrigin resultState `shouldBe` []
+                length (playerStateById activePlayerId resultState).viewingTreasures `shouldBe` 1
+                length (playerStateById secondPlayerId resultState).viewingTreasures `shouldBe` 1
+                gamePlayerTurn resultState `shouldBe` secondPlayerId
+                gameActivePlayer resultState `shouldBe` activePlayerId
+
+            it "returns viewed treasure cards to the deck and advances viewers for RaisingTreasurePass in view mode" $ do
+                let secondPlayerId = mkExistingPlayerId 2
+                    playerOne = basePlayerState { viewingTreasures = [Treasure 7] }
+                    playerTwo = secondBasePlayerState { viewingTreasures = [Treasure 9] }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4], [Curse])
+                            , rtOrder = [activePlayerId, secondPlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = [activePlayerId, secondPlayerId]
+                            }
+                    initialState =
+                        baseGameState
+                            { players = [playerOne, playerTwo]
+                            , activePlayer = activePlayerId
+                            , treasureDeck = ([Treasure 8], [])
+                            , raisingTreasure = Just treasureState
+                            }
+                    resultState = runMakeMoveDirect initialState RaisingTreasurePass
+                (playerStateById activePlayerId resultState).viewingTreasures `shouldBe` []
+                fst (gameTreasureDeck resultState) `shouldBe` [Treasure 7, Treasure 8]
+                raisingTreasureViewing (raisingTreasureState resultState) `shouldBe` [secondPlayerId]
+                gameActivePlayer resultState `shouldBe` secondPlayerId
+
+            it "discards the top treasure when the last chooser passes in RaisingTreasurePass" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4, Treasure 7], [Curse])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
+                    resultState = runMakeMoveDirect initialState RaisingTreasurePass
+                      in raisingTreasureChest (raisingTreasureState resultState) `shouldBe` ([Treasure 7], [Treasure 4, Curse])
+
+            it "advances to the next chooser when a non-final chooser passes in RaisingTreasurePass" $ do
+                let secondPlayerId = mkExistingPlayerId 2
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4, Treasure 7], [Curse])
+                            , rtOrder = [activePlayerId, secondPlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
+                    resultState = runMakeMoveDirect initialState RaisingTreasurePass
+                raisingTreasureIndex (raisingTreasureState resultState) `shouldBe` 1
+                gameActivePlayer resultState `shouldBe` activePlayerId
+
+            it "gives the top treasure to the active chooser and removes them from the order for RaisingTreasureTake" $ do
+                let secondPlayerId = mkExistingPlayerId 2
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4, Treasure 7], [Curse])
+                            , rtOrder = [activePlayerId, secondPlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
+                    resultState = runMakeMoveDirect initialState RaisingTreasureTake
+                (playerStateById activePlayerId resultState).foundTreasures `shouldBe` [Treasure 4]
+                raisingTreasureChest (raisingTreasureState resultState) `shouldBe` ([Treasure 7], [Curse])
+                raisingTreasureOrder (raisingTreasureState resultState) `shouldBe` [secondPlayerId]
+                gameActivePlayer resultState `shouldBe` secondPlayerId
+
+            it "spends an amulet and moves to the next chooser for RaisingTreasureWardCurse" $ do
+                let secondPlayerId = mkExistingPlayerId 2
+                    playerState = basePlayerState { amulets = 2 }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse], [])
+                            , rtOrder = [activePlayerId, secondPlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState =
+                        baseGameState
+                            { players = playerState : drop 1 baseGameState.players
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
+                (playerStateById activePlayerId resultState).amulets `shouldBe` 1
+                raisingTreasureIndex (raisingTreasureState resultState) `shouldBe` 1
+                gameActivePlayer resultState `shouldBe` activePlayerId
+
+            it "finishes treasure raising after the last chooser wards a curse" $ do
+                let playerState = basePlayerState { amulets = 2 }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState =
+                        baseGameState
+                            { players = playerState : drop 1 baseGameState.players
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
+                (playerStateById activePlayerId resultState).amulets `shouldBe` 1
+                gameRaisingTreasure resultState `shouldBe` Nothing
+                gameActivePlayer resultState `shouldBe` gamePlayerTurn resultState
+
+            it "removes one highest treasure and advances for RaisingTreasureAcceptCurse" $ do
+                let secondPlayerId = mkExistingPlayerId 2
+                    playerState = basePlayerState { foundTreasures = [Treasure 3, Treasure 7, Treasure 7, Treasure 5] }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse], [])
+                            , rtOrder = [activePlayerId, secondPlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState =
+                        baseGameState
+                            { players = playerState : drop 1 baseGameState.players
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    resultState = runMakeMoveDirect initialState RaisingTreasureAcceptCurse
+                (playerStateById activePlayerId resultState).foundTreasures `shouldMatchList` [Treasure 3, Treasure 7, Treasure 5]
+                raisingTreasureIndex (raisingTreasureState resultState) `shouldBe` 1
+                gameActivePlayer resultState `shouldBe` activePlayerId
+
+            it "finishes treasure raising after the last chooser accepts a curse" $ do
+                let playerState = basePlayerState { foundTreasures = [Treasure 4] }
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState =
+                        baseGameState
+                            { players = playerState : drop 1 baseGameState.players
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    resultState = runMakeMoveDirect initialState RaisingTreasureAcceptCurse
+                (playerStateById activePlayerId resultState).foundTreasures `shouldBe` []
+                gameRaisingTreasure resultState `shouldBe` Nothing
+                gameActivePlayer resultState `shouldBe` gamePlayerTurn resultState
+
     describe "censorHiddenInfo" $ do
         it "preserves all non-censored data" $
             property $ \viewerId gameState ->
@@ -973,6 +1325,12 @@ basePlayerState =
         playerState : _ -> playerState
         [] -> error "Expected at least one player"
 
+secondBasePlayerState :: PlayerState
+secondBasePlayerState =
+    case drop 1 baseGameState.players of
+        playerState : _ -> playerState
+        [] -> error "Expected at least two players"
+
 gameStateWithBoard :: [(CubeCoordinate Int, TerrainHex)] -> GameState
 gameStateWithBoard hexes =
     baseGameState
@@ -986,6 +1344,63 @@ gameStateWithHexMap hexMap =
         { terrainBoard = CubeCoordinateTokens (toHourHand (0 :: Int)) hexMap
         , activePlayer = activePlayerId
         }
+
+runMakeMoveDirect :: GameState -> PlayerMove -> GameState
+runMakeMoveDirect gameState move = fst (makeMoveDirect gameState move)
+
+gameMessage :: GameState -> Text
+gameMessage = (.latestMessage)
+
+gameClueDeck :: GameState -> ([ClueCard], [ClueCard])
+gameClueDeck = (.clueDeck)
+
+gameTreasureDeck :: GameState -> ([TreasureCard], [TreasureCard])
+gameTreasureDeck = (.treasureDeck)
+
+gamePlayerTurn :: GameState -> PlayerId
+gamePlayerTurn = (.playerTurn)
+
+gameActivePlayer :: GameState -> PlayerId
+gameActivePlayer = (.activePlayer)
+
+gameRaisingTreasure :: GameState -> Maybe RaisingTreasureState
+gameRaisingTreasure = (.raisingTreasure)
+
+raisingTreasureChest :: RaisingTreasureState -> ([TreasureCard], [TreasureCard])
+raisingTreasureChest = (.rtTreasureChest)
+
+raisingTreasureOrder :: RaisingTreasureState -> [PlayerId]
+raisingTreasureOrder = (.rtOrder)
+
+raisingTreasureViewing :: RaisingTreasureState -> [PlayerId]
+raisingTreasureViewing = (.rtViewing)
+
+raisingTreasureIndex :: RaisingTreasureState -> Int
+raisingTreasureIndex = (.rtPlayerIndex)
+
+playerStateById :: PlayerId -> GameState -> PlayerState
+playerStateById wantedPlayerId gameState =
+    case find ((== wantedPlayerId) . (.player.playerId)) gameState.players of
+        Just playerState -> playerState
+        Nothing -> error $ "Expected player " <> show wantedPlayerId
+
+treasureBoardByColor :: ClueColor -> GameState -> ClueBoard
+treasureBoardByColor wantedColor gameState =
+    case find ((== wantedColor) . fst) gameState.treasureBoards of
+        Just (_, clueBoard) -> clueBoard
+        Nothing -> error "Expected treasure board"
+
+raisingTreasureState :: GameState -> RaisingTreasureState
+raisingTreasureState gameState =
+    case gameState.raisingTreasure of
+        Just treasureState -> treasureState
+        Nothing -> error "Expected raising treasure state"
+
+boardTokensAt :: CubeCoordinate Int -> GameState -> [TerrainToken]
+boardTokensAt coord gameState =
+    case Map.lookup coord (terrainBoardMap gameState) of
+        Just (TerrainHex _ _ tokens) -> tokens
+        Nothing -> []
 
 placeJeep :: PlayerId -> CubeCoordinate Int -> HexMap -> HexMap
 placeJeep playerId coord = Map.adjust addPlayerJeep coord
