@@ -3,6 +3,7 @@ module Game.CursedTreasure.API
     , createNewGame
     , enumerateActivePlayerOptions
     , makeMove
+    , heuristicHint
     -- Below are exported for use in testing, the above is the set of API functions.
     , mkCensoredGameState
     , distanceSet
@@ -1154,3 +1155,28 @@ makeMoveDirect gS RaisingTreasureAcceptCurse
             loseMax (Just ts) = let maxT = maximum1 ts
                                     lTs = toList ts in
                 drop 1 (filter (== maxT) lTs) <> filter (/= maxT) lTs
+
+heuristicHint :: Int -> GameState -> [PlayerMove] -> [(Int, PlayerMove)]
+heuristicHint level gS = map heuristicLevel
+    where   heuristicLevel move = (heuristic level move, move)
+            heuristic _ (PlayerMoveError _) = 0
+            heuristic _ PassTurn = -10
+            heuristic _ (PlayClue _ _) = 10
+            heuristic _ ExchangeClueCards = -4
+            heuristic _ PickupAmulet = 11
+            heuristic _ UseAmuletIncrMove = -11
+            heuristic _ (UseAmuletPlayClue _ _) = -11
+            heuristic _ UseAmuletExchangeCards = -11
+            heuristic _ (UseAmuletRemoveSiteMarker {}) = -4
+            heuristic _ (RaiseTreasure _) = 12
+            heuristic _ (MoveJeep i j) = -4 + (length . filter isMarkerTokenOrAmulet) (getTokens i j gS.terrainBoard)
+            heuristic _ RaisingTreasurePass = -10
+            heuristic _ RaisingTreasureTake = 10
+            heuristic _ RaisingTreasureWardCurse = 5
+            heuristic _ RaisingTreasureAcceptCurse = 0
+            getTokens i j (CubeCoordinateTokens _ m) = concatMap tokensOf $ findLocations (findAt i j) m
+            isMarkerTokenOrAmulet (ClueToken _) = True
+            isMarkerTokenOrAmulet Amulet = True
+            isMarkerTokenOrAmulet _ = False
+            findAt i j c _ = mkCubeCoordinate i j == c
+            tokensOf (TerrainHex _ _ ts) = ts

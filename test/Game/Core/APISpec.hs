@@ -57,6 +57,24 @@ spec = do
                         `shouldBe`
                         wrapCursedResult (CursedTreasure.makeMove cursedState cursedMove)
                 _ -> expectationFailure "Expected Cursed Treasure to have at least one legal move"
+
+        it "delegates heuristicHint" $ do
+            let players = take 2 CursedTreasure.getGameSetupPlayers
+                wrappedPlayers = map CursedTreasurePlayerDescription players
+                coreState =
+                    case Core.createNewGame wrappedPlayers 12345 of
+                        Right (gameState, _) -> gameState
+                        Left err -> error $ "expected CursedTreasure game creation to succeed: " <> show err
+                cursedState = case coreState of
+                    CursedTreasureGame gameState -> gameState
+                    _ -> error "Expected CursedTreasureGame"
+                coreMoves = Core.enumerateActivePlayerOptions coreState
+                cursedMoves = CursedTreasure.enumerateActivePlayerOptions cursedState
+
+            Core.heuristicHint 2 coreState coreMoves
+                `shouldBe`
+                map (fmap CursedTreasurePlayerMove) (CursedTreasure.heuristicHint 2 cursedState cursedMoves)
+
 wrapCursedResult :: (CursedTreasure.GameState, [CursedTreasure.CensoredGameState]) -> (GameState, [CensoredGameState])
 wrapCursedResult (gameState, censoredStates) =
     ( CursedTreasureGame gameState

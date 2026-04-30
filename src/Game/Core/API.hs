@@ -3,6 +3,7 @@ module Game.Core.API
     , createNewGame
     , enumerateActivePlayerOptions
     , makeMove
+    , heuristicHint
     )
 where
 
@@ -76,6 +77,23 @@ enumerateActivePlayerOptions = \case
     Core.RealEstateGame gameState ->
         map Core.RealEstatePlayerMove (RealEstate.enumerateActivePlayerOptions gameState)
 
+heuristicHint :: Int -> Core.GameState -> [Core.PlayerMove] -> [(Int, Core.PlayerMove)]
+heuristicHint level gameState playerMoves =
+    case (gameState, playerMoves) of
+        (Core.CursedTreasureGame rulesetState, moves)
+            | Just rulesetMoves <- traverse unwrapCursedTreasureMove moves ->
+                map (fmap Core.CursedTreasurePlayerMove) (CursedTreasure.heuristicHint level rulesetState rulesetMoves)
+        (Core.FogOfBattleGame rulesetState, moves)
+            | Just rulesetMoves <- traverse unwrapFogOfBattleMove moves ->
+                map (fmap Core.FogOfBattlePlayerMove) (FogOfBattle.heuristicHint level rulesetState rulesetMoves)
+        (Core.ArtOfWarGame rulesetState, moves)
+            | Just rulesetMoves <- traverse unwrapArtOfWarMove moves ->
+                map (fmap Core.ArtOfWarPlayerMove) (ArtOfWar.heuristicHint level rulesetState rulesetMoves)
+        (Core.RealEstateGame rulesetState, moves)
+            | Just rulesetMoves <- traverse unwrapRealEstateMove moves ->
+                map (fmap Core.RealEstatePlayerMove) (RealEstate.heuristicHint level rulesetState rulesetMoves)
+        _ -> error "PlayerMove list does not match GameState ruleset."
+
 makeMove :: Core.GameState -> Core.PlayerMove -> (Core.GameState, [Core.CensoredGameState])
 makeMove gameState playerMove =
     case (gameState, playerMove) of
@@ -146,4 +164,24 @@ unwrapArtOfWar = \case
 unwrapRealEstate :: Core.PlayerDescription -> Maybe RealEstate.PlayerDescription
 unwrapRealEstate = \case
     Core.RealEstatePlayerDescription player -> Just player
+    _ -> Nothing
+
+unwrapCursedTreasureMove :: Core.PlayerMove -> Maybe CursedTreasure.PlayerMove
+unwrapCursedTreasureMove = \case
+    Core.CursedTreasurePlayerMove playerMove -> Just playerMove
+    _ -> Nothing
+
+unwrapFogOfBattleMove :: Core.PlayerMove -> Maybe FogOfBattle.PlayerMove
+unwrapFogOfBattleMove = \case
+    Core.FogOfBattlePlayerMove playerMove -> Just playerMove
+    _ -> Nothing
+
+unwrapArtOfWarMove :: Core.PlayerMove -> Maybe ArtOfWar.PlayerMove
+unwrapArtOfWarMove = \case
+    Core.ArtOfWarPlayerMove playerMove -> Just playerMove
+    _ -> Nothing
+
+unwrapRealEstateMove :: Core.PlayerMove -> Maybe RealEstate.PlayerMove
+unwrapRealEstateMove = \case
+    Core.RealEstatePlayerMove playerMove -> Just playerMove
     _ -> Nothing

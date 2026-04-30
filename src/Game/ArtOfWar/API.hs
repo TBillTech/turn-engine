@@ -3,6 +3,7 @@ module Game.ArtOfWar.API
     , createNewGame
     , enumerateActivePlayerOptions
     , makeMove
+    , heuristicHint
     )
 where
 
@@ -22,6 +23,9 @@ createNewGame players _ = (gameState, map (mkCensoredGameState gameState) player
 
 enumerateActivePlayerOptions :: GameState -> [PlayerMove]
 enumerateActivePlayerOptions _ = []
+
+heuristicHint :: Int -> GameState -> [PlayerMove] -> [(Int, PlayerMove)]
+heuristicHint _ _ = map (0,)
 
 makeMove :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
 makeMove gameState _ = (gameState, map (mkCensoredGameState gameState) gameState.players)

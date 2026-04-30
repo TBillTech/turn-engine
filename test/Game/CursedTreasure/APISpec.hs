@@ -1037,7 +1037,7 @@ spec = do
                             , treasureBoards = (firstClueColor, [(secondPlayerId, IsOn (FeatureClue False Jungle))]) : drop 1 baseGameState.treasureBoards
                             }
                     resultState = runMakeMoveDirect initialState (RaiseTreasure firstClueColor)
-                    raisingState = raisingTreasureState resultState
+                    raisingState = getRaisingTreasureState resultState
                 raisingTreasureChest raisingState `shouldBe` ([Treasure 4], [])
                 raisingTreasureOrder raisingState `shouldBe` [activePlayerId, secondPlayerId]
                 raisingTreasureViewing raisingState `shouldBe` [activePlayerId, secondPlayerId]
@@ -1070,7 +1070,7 @@ spec = do
                     resultState = runMakeMoveDirect initialState RaisingTreasurePass
                 (playerStateById activePlayerId resultState).viewingTreasures `shouldBe` []
                 fst (gameTreasureDeck resultState) `shouldBe` [Treasure 7, Treasure 8]
-                raisingTreasureViewing (raisingTreasureState resultState) `shouldBe` [secondPlayerId]
+                raisingTreasureViewing (getRaisingTreasureState resultState) `shouldBe` [secondPlayerId]
                 gameActivePlayer resultState `shouldBe` secondPlayerId
 
             it "discards the top treasure when the last chooser passes in RaisingTreasurePass" $ do
@@ -1083,7 +1083,7 @@ spec = do
                             }
                     initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
                     resultState = runMakeMoveDirect initialState RaisingTreasurePass
-                      in raisingTreasureChest (raisingTreasureState resultState) `shouldBe` ([Treasure 7], [Treasure 4, Curse])
+                      in raisingTreasureChest (getRaisingTreasureState resultState) `shouldBe` ([Treasure 7], [Treasure 4, Curse])
 
             it "advances to the next chooser when a non-final chooser passes in RaisingTreasurePass" $ do
                 let secondPlayerId = mkExistingPlayerId 2
@@ -1096,7 +1096,7 @@ spec = do
                             }
                     initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
                     resultState = runMakeMoveDirect initialState RaisingTreasurePass
-                raisingTreasureIndex (raisingTreasureState resultState) `shouldBe` 1
+                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
                 gameActivePlayer resultState `shouldBe` activePlayerId
 
             it "gives the top treasure to the active chooser and removes them from the order for RaisingTreasureTake" $ do
@@ -1111,8 +1111,8 @@ spec = do
                     initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
                     resultState = runMakeMoveDirect initialState RaisingTreasureTake
                 (playerStateById activePlayerId resultState).foundTreasures `shouldBe` [Treasure 4]
-                raisingTreasureChest (raisingTreasureState resultState) `shouldBe` ([Treasure 7], [Curse])
-                raisingTreasureOrder (raisingTreasureState resultState) `shouldBe` [secondPlayerId]
+                raisingTreasureChest (getRaisingTreasureState resultState) `shouldBe` ([Treasure 7], [Curse])
+                raisingTreasureOrder (getRaisingTreasureState resultState) `shouldBe` [secondPlayerId]
                 gameActivePlayer resultState `shouldBe` secondPlayerId
 
             it "spends an amulet and moves to the next chooser for RaisingTreasureWardCurse" $ do
@@ -1133,7 +1133,7 @@ spec = do
                             }
                     resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
                 (playerStateById activePlayerId resultState).amulets `shouldBe` 1
-                raisingTreasureIndex (raisingTreasureState resultState) `shouldBe` 1
+                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
                 gameActivePlayer resultState `shouldBe` activePlayerId
 
             it "finishes treasure raising after the last chooser wards a curse" $ do
@@ -1174,7 +1174,7 @@ spec = do
                             }
                     resultState = runMakeMoveDirect initialState RaisingTreasureAcceptCurse
                 (playerStateById activePlayerId resultState).foundTreasures `shouldMatchList` [Treasure 3, Treasure 7, Treasure 5]
-                raisingTreasureIndex (raisingTreasureState resultState) `shouldBe` 1
+                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
                 gameActivePlayer resultState `shouldBe` activePlayerId
 
             it "finishes treasure raising after the last chooser accepts a curse" $ do
@@ -1238,17 +1238,17 @@ truncateCensoredFields viewerId gameState =
                 , viewingTreasures = []
                 }
 
-    truncateRaisingTreasure raisingTreasureState =
-        raisingTreasureState
-            { rtTreasureChest = (truncateRaisingTreasureDrawPile raisingTreasureState, snd raisingTreasureState.rtTreasureChest)
+    truncateRaisingTreasure rTState =
+        rTState
+            { rtTreasureChest = (truncateRaisingTreasureDrawPile rTState, snd rTState.rtTreasureChest)
             }
 
-    truncateRaisingTreasureDrawPile raisingTreasureState =
-        if null raisingTreasureState.rtViewing
+    truncateRaisingTreasureDrawPile rTState =
+        if null rTState.rtViewing
             then take 1 drawPile
             else []
       where
-        (drawPile, _) = raisingTreasureState.rtTreasureChest
+        (drawPile, _) = rTState.rtTreasureChest
 
 playerFieldsHidden :: PlayerId -> PlayerState -> Bool
 playerFieldsHidden viewerId playerState
@@ -1258,11 +1258,11 @@ playerFieldsHidden viewerId playerState
             && all (== HiddenTreasure) playerState.viewingTreasures
 
 raisingTreasureHidden :: RaisingTreasureState -> Bool
-raisingTreasureHidden raisingTreasureState 
-    | null raisingTreasureState.rtViewing = notElem HiddenTreasure (take 1 drawPile) && all (== HiddenTreasure) (drop 1 drawPile)
+raisingTreasureHidden rTState
+    | null rTState.rtViewing = notElem HiddenTreasure (take 1 drawPile) && all (== HiddenTreasure) (drop 1 drawPile)
     | otherwise = all (== HiddenTreasure) drawPile
   where
-    (drawPile, _) = raisingTreasureState.rtTreasureChest
+    (drawPile, _) = rTState.rtTreasureChest
 
 validPlayerCountGen :: Gen Int
 validPlayerCountGen = elements [2, 3, 4]
@@ -1390,8 +1390,8 @@ treasureBoardByColor wantedColor gameState =
         Just (_, clueBoard) -> clueBoard
         Nothing -> error "Expected treasure board"
 
-raisingTreasureState :: GameState -> RaisingTreasureState
-raisingTreasureState gameState =
+getRaisingTreasureState :: GameState -> RaisingTreasureState
+getRaisingTreasureState gameState =
     case gameState.raisingTreasure of
         Just treasureState -> treasureState
         Nothing -> error "Expected raising treasure state"
@@ -1403,7 +1403,7 @@ boardTokensAt coord gameState =
         Nothing -> []
 
 placeJeep :: PlayerId -> CubeCoordinate Int -> HexMap -> HexMap
-placeJeep playerId coord = Map.adjust addPlayerJeep coord
+placeJeep playerId = Map.adjust addPlayerJeep
   where
     addPlayerJeep (TerrainHex isLargest feature tokens) =
         TerrainHex isLargest feature (PlayerJeep playerId : filter (not . isPlayerJeep) tokens)
