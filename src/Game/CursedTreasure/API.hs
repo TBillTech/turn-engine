@@ -4,6 +4,7 @@ module Game.CursedTreasure.API
     , enumerateActivePlayerOptions
     , makeMove
     , heuristicHint
+    , summary
     -- Below are exported for use in testing, the above is the set of API functions.
     , mkCensoredGameState
     , distanceSet
@@ -26,15 +27,17 @@ module Game.CursedTreasure.API
     , enumeratePossibleCluePlays
     , enumeratePlayerOptions
     , makeMoveDirect
+    , makeMoveSummary
     )
 where
 
 import Lens.Micro.Platform ((%~), Lens', lens, Traversal')
+import qualified Data.Text as Text
 import Relude.Extra (bimapF, maximum1)
 import Relude.Extra.Map (insert, keys, member, notMember, toPairs, alter)
 import System.Random (mkStdGen, uniformR, RandomGen, uniformShuffleList, splitGen, StdGen)
-import qualified Data.Map.Strict as Map (elemAt, empty,
-    union, filter, filterWithKey, restrictKeys, withoutKeys)
+import qualified Data.Map.Strict as Map (elemAt, elems, empty,
+    lookup, union, filter, filterWithKey, restrictKeys, withoutKeys)
 import qualified Data.Set as Set (difference, intersection,
     union, difference, empty, filter, elemAt, insert, filter,
     unions)
@@ -801,8 +804,26 @@ applyClue board (color, card) = (beforeMarkers, afterMarkers)
             afterMarkers = findLocations (matchCard card) beforeMarkers
             matchCard = matchClueCard board
 
+-- | Rewrites clue markers in place while preserving every board hex and non-clue token.
+applyClueToBoard :: HexMap -> (ClueColor, ClueCard) -> HexMap
+applyClueToBoard board (color, card) = foldr updateMarker board markerCoords
+        where
+                (beforeMarkers, afterMarkers) = applyClue board (color, card)
+                markerCoords = keys $ Map.union beforeMarkers afterMarkers
+                updateMarker coord = alter (updateHex <$>) coord
+                    where
+                        updateHex (TerrainHex isLargest feature tokens) =
+                                TerrainHex isLargest feature updatedTokens
+                            where
+                                withoutColor = filter (/= ClueToken color) tokens
+                                updatedTokens
+                                        | coord `member` afterMarkers = ClueToken color : withoutColor
+                                        | otherwise = withoutColor
+
 -- | Adds legal clue-play actions that would strictly narrow the chosen clue board.
 enumeratePossibleCluePlays :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+enumeratePossibleCluePlays player _ (GameModeNominal, moves)
+    | player.availableCluePlays == 0 = (GameModeNominal, moves)
 enumeratePossibleCluePlays player gS (GameModeNominal, moves) = (GameModeNominal, allOptions ++ moves)
     where   allOptions = concatMap (map toM . filter possible . zip (take 4 allClueColors) . repeat) player.clues
             toM (color, card) = PlayClue color card
@@ -864,7 +885,7 @@ playClueAndUpdate color card pId gS = eVerifyCard <*> eUpdates
             eVerifyCard = id <$ (findCard =<< ePlayer)
             findCard player = if card `elem` player.clues then Right card
                 else Left $ "Could not find " <> show card <> " in player " <> show pId <> " clues."
-            boardUpd = snd . flip applyClue (color, card)
+            boardUpd = flip applyClueToBoard (color, card)
             eClues = (.clues) <$> ePlayer
             eCluesAndBoard = (,) <$> eClues <*> eClueBoard
             eCardUpds = uncurry (moveCard (Just card) (pId, )) =<< eCluesAndBoard
@@ -964,11 +985,20 @@ raiseTreasureNextChooser s  | isNothing mNextPlayerIndex = s & raiseTreasureFini
                 raising <- s.raisingTreasure
                 _ <- nonEmpty (fst raising.rtTreasureChest)
                 neOrder <- nonEmpty raising.rtOrder
-                let rtPlayerIndex = raising.rtPlayerIndex
-                    rtNextPlayerIndex = rtPlayerIndex+1 `mod` length neOrder
-                pure rtNextPlayerIndex
+                let order = toList neOrder
+                    rtPlayerIndex = raising.rtPlayerIndex
+                    currentChooser = fromMaybe (head neOrder) $ order !!? (rtPlayerIndex `mod` length order)
+                nextDistinctIndex currentChooser (rtPlayerIndex + 1) order
 
             updChooser rt = rt { rtPlayerIndex = fromMaybe 0 mNextPlayerIndex }
+            nextDistinctIndex _ _ [] = Nothing
+            nextDistinctIndex currentChooser startIndex order =
+                go startIndex (drop startIndex order)
+              where
+                go _ [] = Nothing
+                go index (playerId:rest)
+                    | playerId /= currentChooser = Just index
+                    | otherwise = go (index + 1) rest
 
 -- | Resets treasure choice to the start of the chooser order, or finishes if no choices remain.
 raiseTreasureChooseStart :: GameState -> GameState
@@ -979,6 +1009,20 @@ raiseTreasureChooseStart s  | isNothing mOrder = s & raiseTreasureFinished
                 _ <- nonEmpty (fst raising.rtTreasureChest)
                 nonEmpty raising.rtOrder
             updChooser rt = rt { rtPlayerIndex = 0 }
+
+-- | Restarts treasure choice after a discard, keeping the current chooser's position when possible.
+raiseTreasureChooseCurrent :: GameState -> GameState
+raiseTreasureChooseCurrent s  | isNothing mOrder = s & raiseTreasureFinished
+                              | otherwise = s & raiseTreasureL %~ (updChooser <$>) & setActivePlayer
+    where   mOrder = do
+                raising <- s.raisingTreasure
+                _ <- nonEmpty (fst raising.rtTreasureChest)
+                neOrder <- nonEmpty raising.rtOrder
+                pure (toList neOrder)
+            currentIndex = maybe 0 (.rtPlayerIndex) s.raisingTreasure
+            updChooser rt =
+                let orderLength = max 1 (length rt.rtOrder)
+                 in rt { rtPlayerIndex = currentIndex `mod` orderLength }
 
 -- | Assigns the acting player based on the current turn or treasure-raising subphase.
 setActivePlayer :: GameState -> GameState
@@ -993,33 +1037,61 @@ setActivePlayer gS
             mChooser = do
                 raising <- gS.raisingTreasure
                 neOrder <- nonEmpty raising.rtOrder
-                let rtPlayerIndex = raising.rtPlayerIndex
-                    rtNextPlayerIndex = rtPlayerIndex+1 `mod` length neOrder
-                neAtPlayerIndex <- nonEmpty $ drop rtNextPlayerIndex (toList neOrder)
+                let rtPlayerIndex = raising.rtPlayerIndex `mod` length neOrder
+                neAtPlayerIndex <- nonEmpty $ drop rtPlayerIndex (toList neOrder)
                 pure (head neAtPlayerIndex)
 
 -- | Returns any viewed treasure cards to the chest and advances the viewer queue.
 raiseTreasureViewPass :: GameState -> GameState
 raiseTreasureViewPass s =
-    s   & playerL pId %~ updTCards & treasureDeckL %~ updTDeck & raiseTreasureL %~ (updViewers <$>)
+    s   & playerL pId %~ updTCards & raiseTreasureL %~ (updTreasureState <$>)
         & setActivePlayer & if lastViewer then raiseTreasureShuffle else id
     where   pId = s.activePlayer
             ePlayer = findPlayer pId s
             playerCards = either (const []) (.viewingTreasures) ePlayer
             updTCards player = player { viewingTreasures = [] }
-            updTDeck = first (playerCards ++)
             lastViewer = maybe False ((== 1) . length . (.rtViewing)) mRaising
             mRaising = s.raisingTreasure
-            updViewers rt = rt { rtViewing = drop 1 rt.rtViewing}
+            updTreasureState rt =
+                rt
+                    { rtTreasureChest = first (playerCards ++) rt.rtTreasureChest
+                    , rtViewing = filter (/= pId) rt.rtViewing
+                    }
 
 -- | Applies a move only if it is currently legal; otherwise records an error message.
 makeMoveParanoid :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
 makeMoveParanoid gS move | move `elem` enumerateActivePlayerOptions gS = makeMoveDirect gS move
-                         | otherwise = censorGame $ gS & messageL %~ (e <>)
-    where e = "Move " <> show move <> " is not allowed for current player."
+                         | otherwise = censorGame $ gS & messageL %~ appendError
+    where e = "Move " <> makeMoveSummary gS move <> " is not allowed for current player."
+          appendError "" = e
+          appendError message = message <> " | " <> e
+
+makeMoveSummary :: GameState -> PlayerMove -> Text
+makeMoveSummary _ (PlayerMoveError e) = "PlayerMoveError " <> e
+makeMoveSummary _ PassTurn = "PassTurn"
+makeMoveSummary _ (PlayClue color card) = "PlayClue " <> show color <> " " <> show card
+makeMoveSummary gS (MoveJeep i j) = "MoveJeep " <> show (i, j) <> " " <> formatMoveTokens (tokensAtDestination gS i j)
+makeMoveSummary _ ExchangeClueCards = "ExchangeClueCards"
+makeMoveSummary _ PickupAmulet = "PickupAmulet"
+makeMoveSummary _ UseAmuletIncrMove = "UseAmuletIncrMove"
+makeMoveSummary _ (UseAmuletPlayClue color card) = "UseAmuletPlayClue " <> show color <> " " <> show card
+makeMoveSummary _ UseAmuletExchangeCards = "UseAmuletExchangeCards"
+makeMoveSummary _ (UseAmuletRemoveSiteMarker color i j) = "UseAmuletRemoveSiteMarker " <> show color <> " " <> show (i, j)
+makeMoveSummary _ (RaiseTreasure color) = "RaiseTreasure " <> show color
+makeMoveSummary _ RaisingTreasurePass = "RaisingTreasurePass"
+makeMoveSummary _ RaisingTreasureTake = "RaisingTreasureTake"
+makeMoveSummary _ RaisingTreasureWardCurse = "RaisingTreasureWardCurse"
+makeMoveSummary _ RaisingTreasureAcceptCurse = "RaisingTreasureAcceptCurse"
+
+tokensAtDestination :: GameState -> Int -> Int -> [TerrainToken]
+tokensAtDestination gS i j = maybe [] tokensAtCoord $ Map.lookup (mkCubeCoordinate i j) (getHexMap gS.terrainBoard)
+    where tokensAtCoord (TerrainHex _ _ ts) = ts
+
+formatMoveTokens :: [TerrainToken] -> Text
+formatMoveTokens ts = "tokens=" <> show ts
 
 makeMove :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
-makeMove = makeMoveParanoid
+makeMove gS move = makeMoveParanoid (gS & messageL %~ const (makeMoveSummary gS move)) move
 
 -- | Returns 'True' when treasure resolution is waiting on viewers rather than choosers.
 isViewingTreasure :: GameState -> Bool
@@ -1034,8 +1106,12 @@ isLastChooser :: GameState -> Bool
 isLastChooser gS = mMode == Just True
     where   mMode = do
                 raising <- gS.raisingTreasure
-                let rtPlayerIndex = raising.rtPlayerIndex
-                    isLastChoice = rtPlayerIndex == length raising.rtOrder - 1
+                neOrder <- nonEmpty raising.rtOrder
+                let order = toList neOrder
+                    rtPlayerIndex = raising.rtPlayerIndex `mod` length order
+                    currentChooser = fromMaybe (head neOrder) $ order !!? rtPlayerIndex
+                    remainingChoosers = drop (rtPlayerIndex + 1) order
+                    isLastChoice = all (== currentChooser) remainingChoosers
                 pure isLastChoice
 
 -- | Executes a move without checking legality and returns fresh censored views.
@@ -1052,10 +1128,13 @@ makeMoveDirect gS (PlayClue color card) = censorGame $
 makeMoveDirect gS (MoveJeep i j) = censorGame $
     gS & moveJeepDirect i j & playerL pId %~ playerUsedOptions
     where   pId = gS.activePlayer
-            playerUsedOptions player = player { availableJeepMoves = player.availableJeepMoves - 1
-                                              , availableCluePlays = 0
-                                              , availableRemoveMarkers = 0
-                                              , availableClueCardExchange = 0}
+            isForcedPlacement = isNothing $ findFirstToken (PlayerJeep pId) (getHexMap gS.terrainBoard)
+            playerUsedOptions
+                | isForcedPlacement = id
+                | otherwise = \player -> player { availableJeepMoves = player.availableJeepMoves - 1
+                                                , availableCluePlays = 0
+                                                , availableRemoveMarkers = 0
+                                                , availableClueCardExchange = 0}
 makeMoveDirect gS ExchangeClueCards = censorGame $
     gS & exchangeCardsDirect & playerL pId %~ playerUsedOptions
     where   pId = gS.activePlayer
@@ -1110,14 +1189,20 @@ makeMoveDirect gS (RaiseTreasure color) = censorGame $
             pTurns = case filter ((color ==) . fst) gS.treasureBoards of
                 [(_, playerIds)] -> pId:map fst playerIds
                 _ -> [pId]
+            viewTurns = uniquePlayers pTurns
             topCard = take 1 $ fst gS.treasureDeck
             initTreasure s = s { raisingTreasure = Just initialRaisingTreasureState }
             initialRaisingTreasureState = RaisingTreasureState
                 { rtTreasureChest = (topCard, [])
                 , rtOrder = pTurns
                 , rtPlayerIndex = 0
-                , rtViewing = pTurns}
+                , rtViewing = viewTurns}
             clearColor (TerrainHex isL f ts) = TerrainHex isL f (filter (/= ClueToken color) ts)
+            uniquePlayers = go []
+            go _ [] = []
+            go seen (playerId:rest)
+                | playerId `elem` seen = go seen rest
+                | otherwise = playerId : go (playerId : seen) rest
             dealTreasureCards [] s = s
             dealTreasureCards (anId:rest) s =
                 s & dealTreasureCards rest & dealTreasureCardDirect anId
@@ -1138,8 +1223,7 @@ makeMoveDirect gS RaisingTreasureTake = censorGame $
             removeTopT rT = rT { rtTreasureChest = first (drop 1) rT.rtTreasureChest }
             removeTaker rT = rT { rtPlayerIndex = 0
                                 , rtOrder = removePlayerIndex rT.rtOrder }
-            removePlayerIndex pList
-                = take playerIndex pList <> drop (playerIndex+1) pList
+            removePlayerIndex pList = take playerIndex pList <> drop (playerIndex + 1) pList
 makeMoveDirect gS RaisingTreasureWardCurse
     | isLastChooser gS = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureFinished
     | otherwise = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureNextChooser
@@ -1180,3 +1264,33 @@ heuristicHint level gS = map heuristicLevel
             isMarkerTokenOrAmulet _ = False
             findAt i j c _ = mkCubeCoordinate i j == c
             tokensOf (TerrainHex _ _ ts) = ts
+
+summary :: GameState -> Text
+summary gameState = Text.intercalate " | " summaryParts
+    where
+        summaryParts = catMaybes
+            [ latestMessagePart
+            , Just $ "turn=" <> show gameState.turn
+            , Just $ "playerTurn=" <> show gameState.playerTurn
+            , Just $ "activePlayer=" <> show gameState.activePlayer
+            , Just $ "treasureDraw=" <> show (length drawPile)
+            , Just $ "treasures=" <> treasureMarkerSummary
+            , boardSummaryPart
+            , Just $ "gameOver=" <> show gameState.gameOver
+            , Just $ "seed=" <> show gameState.seed
+            ]
+        latestMessagePart
+            | gameState.latestMessage == "" = Nothing
+            | otherwise = Just gameState.latestMessage
+        boardSummaryPart
+            | gameState.turn == 1 = Just $ "boardHexes=\n" <> boardHexSummary
+            | otherwise = Nothing
+        boardHexSummary = Text.intercalate "\n" $ map summarizeHex (toPairs $ getHexMap gameState.terrainBoard)
+        summarizeHex (coord, TerrainHex isLargest feature tokens) =
+            show (toPair coord) <> " " <> show isLargest <> " " <> show feature <> " " <> show tokens
+        treasureMarkerSummary = Text.intercalate ", " $ map summarizeColor allClueColors
+        summarizeColor color = show color <> ":" <> show (countClueMarkers color)
+        countClueMarkers color = length $ concatMap matchingColorTokens (Map.elems $ getHexMap gameState.terrainBoard)
+            where
+                matchingColorTokens (TerrainHex _ _ tokens) = filter (== ClueToken color) tokens
+        (drawPile, _) = gameState.treasureDeck

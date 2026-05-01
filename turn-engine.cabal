@@ -39,7 +39,10 @@ library
     import:           common-options
     hs-source-dirs:   src
     exposed-modules:
-        Lib
+        App.CLI
+        App.DumbPlay
+        App.Protocol
+        App.Service
         Game.Logic
         Game.Types
         Game.Core.API
@@ -56,7 +59,8 @@ library
     build-depends:
         random ^>=1.3.1,
         microlens-platform,
-        aeson >= 2.2
+        aeson >= 2.2,
+        bytestring
 
 executable turn-engine
     import:           common-options
@@ -69,8 +73,7 @@ test-suite turn-engine-test
     import:           common-options
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
-    other-modules:    LibSpec
-                    , Game.Core.APISpec
+    other-modules:    Game.Core.APISpec
                     , Game.Core.PrimitivesSpec
                     , Game.Arbitrary
                     , Game.CursedTreasure.Arbitrary

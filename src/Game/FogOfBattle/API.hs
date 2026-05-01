@@ -4,6 +4,7 @@ module Game.FogOfBattle.API
     , enumerateActivePlayerOptions
     , makeMove
     , heuristicHint
+    , summary
     )
 where
 
@@ -29,6 +30,9 @@ heuristicHint _ _ = map (0,)
 
 makeMove :: GameState -> PlayerMove -> (GameState, [CensoredGameState])
 makeMove gameState _ = (gameState, map (mkCensoredGameState gameState) gameState.players)
+
+summary :: GameState -> Text
+summary _ = "undefined"
 
 mkCensoredGameState :: GameState -> PlayerDescription -> CensoredGameState
 mkCensoredGameState gameState _ = CensoredGameState gameState

@@ -35,6 +35,7 @@ module Game.CursedTreasure.APISpec where
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Data.Text as Text
 import System.Random (mkStdGen, uniformShuffleList)
 import Test.Hspec
 import Test.QuickCheck
@@ -42,6 +43,7 @@ import Test.QuickCheck
 import Game.Core.Primitives
     ( CubeCoordinate
     , CubeCoordinateTokens (CubeCoordinateTokens)
+    , GameColor (Black)
     , isUnitCubeDist
     , mkCubeCoordinate
     , radiusOneCubeCoordinates
@@ -54,6 +56,7 @@ import Game.CursedTreasure.API
     , createNewGame
     , distanceSet
     , applyClue
+    , enumerateActivePlayerOptions
     , enumeratePossibleJeepMoves
     , enumeratePossibleCluePlays
     , enumeratePlayerOptions
@@ -62,7 +65,9 @@ import Game.CursedTreasure.API
     , getConnectedSets
     , isRaisingTreasure
     , isValidTerrainBoard
+    , makeMove
     , makeMoveDirect
+    , makeMoveSummary
     , matchClueCard
     , matchObject
     , mkCensoredGameState
@@ -73,6 +78,7 @@ import Game.CursedTreasure.API
     , raiseTreasureCase
     , raisingTreasureChoiceCase
     , raisingTreasureViewCase
+    , summary
     )
 import Game.CursedTreasure.Arbitrary ()
 import Game.CursedTreasure.Types
@@ -91,12 +97,15 @@ import Game.CursedTreasure.Types
     , PlayerMove (..)
     , PlayerState (..)
     , RaisingTreasureState (..)
+    , Score (..)
     , TerrainToken (..)
     , TerrainHex (..)
     , ToGameState (toGameState)
     , TreasureCard (..)
+    , TreasureBoard
     , allClueColors
     , censorRaisingTreasure
+    , mkClueColor
     , mkPlayerId
     )
 
@@ -239,6 +248,17 @@ spec = do
                             [ length shuffledValues === length values
                             , elementCounts shuffledValues === elementCounts values
                             ]
+
+        it "never offers MoveJeep to an Ocean hex on a fresh random board" $ do
+            let (gameState, _) = createNewGame (take 2 getGameSetupPlayers) 12345
+                moveDestinations =
+                    [ mkCubeCoordinate i j
+                    | MoveJeep i j <- enumerateActivePlayerOptions gameState
+                    ]
+                terrainAt coord = case Map.lookup coord (terrainBoardMap gameState) of
+                    Just (TerrainHex _ feature _) -> Just feature
+                    Nothing -> Nothing
+            map terrainAt moveDestinations `shouldSatisfy` all (/= Just Ocean)
 
         it "creates a GameState with the requested number of players for seed 12345" $ do
             assertCreateNewGamePlayerCount 3 12345
@@ -493,6 +513,20 @@ spec = do
                     (_, moves) = enumeratePossibleCluePlays playerState gameState (GameModeNominal, [PassTurn])
                  in moves `shouldBe` [PassTurn]
 
+            it "adds no clue plays when availableCluePlays is 0" $ do
+                let playerState =
+                        basePlayerState
+                            { clues = [IsOn (FeatureClue False Jungle)]
+                            , availableCluePlays = 0
+                            }
+                    gameState =
+                        gameStateWithBoard
+                            [ (origin, TerrainHex False Meadow [])
+                            , (adjacentOrigin, TerrainHex False Jungle [])
+                            ]
+                    (_, moves) = enumeratePossibleCluePlays playerState gameState (GameModeNominal, [PassTurn])
+                 in moves `shouldBe` [PassTurn]
+
         describe "passTurnOption" $ do
             it "adds PassTurn in nominal mode" $ do
                 passTurnOption (GameModeNominal, [ExchangeClueCards])
@@ -632,6 +666,22 @@ spec = do
                     mode `shouldBe` GameModeNominal
                     moves `shouldMatchList` expectedMoves
 
+            it "does not add ExchangeClueCards when availableClueCardExchange is 0" $ do
+                let playerState =
+                        basePlayerState
+                            { amulets = 0
+                            , clues = []
+                            , availableJeepMoves = 0
+                            , availableCluePlays = 0
+                            , availablePickupAmulet = 0
+                            , availableClueCardExchange = 0
+                            }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [PlayerJeep activePlayerId])]
+                    (mode, moves) = enumeratePlayerOptions playerState gameState
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldBe` [PassTurn]
+
         describe "enumeratePossibleJeepMoves" $ do
             it "allows every non-ocean hex when the jeep is not on the board" $ do
                 let playerState = basePlayerState { availableJeepMoves = 1 }
@@ -664,6 +714,18 @@ spec = do
                  in do
                     mode `shouldBe` GameModeNominal
                     moves `shouldMatchList` expectedMoves
+
+            it "adds no jeep moves when availableJeepMoves is 0" $ do
+                let playerState = basePlayerState { availableJeepMoves = 0 }
+                    boardHexes =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (adjacentOrigin, TerrainHex False Jungle [])
+                        ]
+                    gameState = gameStateWithBoard boardHexes
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldBe` [PassTurn]
 
             it "offers the jeep's territory plus adjacent non-ocean hexes when the jeep is on a territory boundary" $ do
                 let playerState = basePlayerState { availableJeepMoves = 1 }
@@ -880,7 +942,8 @@ spec = do
                     resultState = runMakeMoveDirect initialState (PlayClue firstClueColor clueCard)
                     resultPlayer = playerStateById activePlayerId resultState
                  in do
-                    terrainBoardMap resultState `shouldBe` snd (applyClue (Map.fromList boardHexes) (firstClueColor, clueCard))
+                    terrainBoardMap resultState
+                        `shouldBe` applyClueToBoardExpected (Map.fromList boardHexes) (firstClueColor, clueCard)
                     resultPlayer.clues `shouldBe` [replacementCard]
                     playerBudgets resultPlayer `shouldBe` (0, 0, 0, 1, 0)
                     treasureBoardByColor firstClueColor resultState `shouldBe` [(activePlayerId, clueCard)]
@@ -907,6 +970,299 @@ spec = do
                     boardTokensAt jeepCoord resultState `shouldNotContain` [PlayerJeep activePlayerId]
                     boardTokensAt destination resultState `shouldContain` [PlayerJeep activePlayerId]
                     playerBudgets resultPlayer `shouldBe` (1, 0, 0, 1, 0)
+
+        describe "makeMove" $ do
+            it "seeds latestMessage with the move summary before illegal-move validation" $ do
+                let attemptedMove = PickupAmulet
+                    resultState = fst (makeMove baseGameState attemptedMove)
+                 in gameMessage resultState `shouldBe`
+                        makeMoveSummary baseGameState attemptedMove <> " | Move " <> makeMoveSummary baseGameState attemptedMove <> " is not allowed for current player."
+
+            it "supports a weighted black-treasure raise sequence from a createNewGame setup" $ do
+                let initialState = blackTreasureRaiseSetupState
+                    initialDrawPileSize = length (fst (gameTreasureDeck initialState))
+                    raiseMove = RaiseTreasure blackClueColor
+                    applyLegalMove expectedPlayer move gameState = do
+                        gameActivePlayer gameState `shouldBe` expectedPlayer
+                        enumerateActivePlayerOptions gameState `shouldContain` [move]
+                        pure (fst (makeMove gameState move))
+
+                enumerateActivePlayerOptions initialState `shouldContain` [raiseMove]
+
+                stateAfterRaise <- applyLegalMove activePlayerId raiseMove initialState
+                raisingTreasureOrder (getRaisingTreasureState stateAfterRaise)
+                    `shouldBe` [activePlayerId, activePlayerId, secondPlayerId, activePlayerId]
+                length (playerStateById activePlayerId stateAfterRaise).viewingTreasures `shouldBe` 3
+                length (playerStateById secondPlayerId stateAfterRaise).viewingTreasures `shouldBe` 1
+                length (fst (gameTreasureDeck stateAfterRaise)) `shouldBe` initialDrawPileSize - 5
+
+                stateAfterPlayerOneView <- applyLegalMove activePlayerId RaisingTreasurePass stateAfterRaise
+                (playerStateById activePlayerId stateAfterPlayerOneView).viewingTreasures `shouldBe` []
+                gameActivePlayer stateAfterPlayerOneView `shouldBe` secondPlayerId
+
+                stateAfterPlayerTwoView <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterPlayerOneView
+                raisingTreasureOrder (getRaisingTreasureState stateAfterPlayerTwoView)
+                    `shouldBe` [activePlayerId, activePlayerId, secondPlayerId, activePlayerId]
+                raisingTreasureViewing (getRaisingTreasureState stateAfterPlayerTwoView) `shouldBe` []
+                gameActivePlayer stateAfterPlayerTwoView `shouldBe` activePlayerId
+
+                stateAfterFirstTake <- applyLegalMove activePlayerId RaisingTreasureTake stateAfterPlayerTwoView
+                raisingTreasureOrder (getRaisingTreasureState stateAfterFirstTake)
+                    `shouldBe` [activePlayerId, secondPlayerId, activePlayerId]
+                length (playerStateById activePlayerId stateAfterFirstTake).foundTreasures `shouldBe` 1
+                gameActivePlayer stateAfterFirstTake `shouldBe` activePlayerId
+
+                stateAfterPlayerOnePass <- applyLegalMove activePlayerId RaisingTreasurePass stateAfterFirstTake
+                gameActivePlayer stateAfterPlayerOnePass `shouldBe` secondPlayerId
+
+                stateAfterPlayerTwoPass <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterPlayerOnePass
+                gameActivePlayer stateAfterPlayerTwoPass `shouldBe` activePlayerId
+
+                stateAfterSecondTake <- applyLegalMove activePlayerId RaisingTreasureTake stateAfterPlayerTwoPass
+                length (playerStateById activePlayerId stateAfterSecondTake).foundTreasures `shouldBe` 2
+                gameActivePlayer stateAfterSecondTake `shouldBe` activePlayerId
+
+                stateAfterThirdPlayerOnePass <- applyLegalMove activePlayerId RaisingTreasurePass stateAfterSecondTake
+                gameActivePlayer stateAfterThirdPlayerOnePass `shouldBe` secondPlayerId
+
+                stateAfterThirdPlayerTwoPass <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterThirdPlayerOnePass
+                gameActivePlayer stateAfterThirdPlayerTwoPass `shouldBe` activePlayerId
+
+                finalState <- applyLegalMove activePlayerId RaisingTreasureTake stateAfterThirdPlayerTwoPass
+                finalState.gameOver `shouldBe` False
+                length (playerStateById activePlayerId finalState).foundTreasures `shouldBe` 3
+                length (playerStateById secondPlayerId finalState).foundTreasures `shouldBe` 0
+                gameActivePlayer finalState `shouldBe` secondPlayerId
+                raisingTreasureOrder (getRaisingTreasureState finalState) `shouldBe` [secondPlayerId]
+                raisingTreasureChest (getRaisingTreasureState finalState) `shouldBe` ([Treasure 2], [Treasure 2])
+
+                resolvedState <- applyLegalMove secondPlayerId RaisingTreasureTake finalState
+                gameRaisingTreasure resolvedState `shouldBe` Nothing
+                length (playerStateById activePlayerId resolvedState).foundTreasures `shouldBe` 3
+                length (playerStateById secondPlayerId resolvedState).foundTreasures `shouldBe` 1
+                gamePlayerTurn resolvedState `shouldBe` secondPlayerId
+                gameActivePlayer resolvedState `shouldBe` secondPlayerId
+                playerBudgets (playerStateById secondPlayerId resolvedState) `shouldBe` startTurnBudget
+                length (fst (gameTreasureDeck resolvedState)) `shouldBe` initialDrawPileSize - 5
+
+            it "supports a weighted black-treasure sequence that exhausts a five-card deck into game over" $ do
+                let initialState = blackTreasureGameOverSetupState
+                    raiseMove = RaiseTreasure blackClueColor
+                    applyLegalMove expectedPlayer move gameState = do
+                        gameActivePlayer gameState `shouldBe` expectedPlayer
+                        enumerateActivePlayerOptions gameState `shouldContain` [move]
+                        pure (fst (makeMove gameState move))
+
+                enumerateActivePlayerOptions initialState `shouldContain` [raiseMove]
+                length (fst (gameTreasureDeck initialState)) `shouldBe` 5
+
+                stateAfterRaise <- applyLegalMove activePlayerId raiseMove initialState
+                length (fst (gameTreasureDeck stateAfterRaise)) `shouldBe` 0
+                raisingTreasureOrder (getRaisingTreasureState stateAfterRaise)
+                    `shouldBe` [activePlayerId, secondPlayerId, activePlayerId, secondPlayerId]
+
+                stateAfterPlayerOneView <- applyLegalMove activePlayerId RaisingTreasurePass stateAfterRaise
+                stateAfterPlayerTwoView <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterPlayerOneView
+                gameActivePlayer stateAfterPlayerTwoView `shouldBe` activePlayerId
+
+                stateAfterPlayerOneFirstPass <- applyLegalMove activePlayerId RaisingTreasurePass stateAfterPlayerTwoView
+                gameActivePlayer stateAfterPlayerOneFirstPass `shouldBe` secondPlayerId
+
+                stateAfterPlayerTwoFirstPass <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterPlayerOneFirstPass
+                gameActivePlayer stateAfterPlayerTwoFirstPass `shouldBe` activePlayerId
+
+                stateAfterPlayerOneSecondPass <- applyLegalMove activePlayerId RaisingTreasurePass stateAfterPlayerTwoFirstPass
+                gameActivePlayer stateAfterPlayerOneSecondPass `shouldBe` secondPlayerId
+
+                stateAfterPlayerTwoFirstTake <- applyLegalMove secondPlayerId RaisingTreasureTake stateAfterPlayerOneSecondPass
+                raisingTreasureOrder (getRaisingTreasureState stateAfterPlayerTwoFirstTake)
+                    `shouldBe` [activePlayerId, secondPlayerId, activePlayerId]
+
+                stateAfterPlayerOneFirstTake <- applyLegalMove activePlayerId RaisingTreasureTake stateAfterPlayerTwoFirstTake
+                raisingTreasureOrder (getRaisingTreasureState stateAfterPlayerOneFirstTake)
+                    `shouldBe` [secondPlayerId, activePlayerId]
+
+                stateAfterPlayerTwoSecondPass <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterPlayerOneFirstTake
+                gameActivePlayer stateAfterPlayerTwoSecondPass `shouldBe` activePlayerId
+
+                stateAfterPlayerOneSecondTake <- applyLegalMove activePlayerId RaisingTreasureTake stateAfterPlayerTwoSecondPass
+                raisingTreasureOrder (getRaisingTreasureState stateAfterPlayerOneSecondTake)
+                    `shouldBe` [secondPlayerId]
+
+                stateAfterPlayerTwoFinalPass <- applyLegalMove secondPlayerId RaisingTreasurePass stateAfterPlayerOneSecondTake
+                raisingTreasureOrder (getRaisingTreasureState stateAfterPlayerTwoFinalPass)
+                    `shouldBe` [secondPlayerId]
+                gameActivePlayer stateAfterPlayerTwoFinalPass `shouldBe` secondPlayerId
+
+                resolvedState <- applyLegalMove secondPlayerId RaisingTreasureTake stateAfterPlayerTwoFinalPass
+                gameRaisingTreasure resolvedState `shouldBe` Nothing
+                resolvedState.gameOver `shouldBe` True
+                gamePlayerTurn resolvedState `shouldBe` secondPlayerId
+                gameActivePlayer resolvedState `shouldBe` secondPlayerId
+                playerBudgets (playerStateById secondPlayerId resolvedState) `shouldBe` startTurnBudget
+                length (fst (gameTreasureDeck resolvedState)) `shouldBe` 0
+                let playerOneScore = (playerStateById activePlayerId resolvedState).score
+                    playerTwoScore = (playerStateById secondPlayerId resolvedState).score
+                length (playerStateById activePlayerId resolvedState).foundTreasures `shouldBe` 2
+                length (playerStateById secondPlayerId resolvedState).foundTreasures `shouldBe` 2
+                playerOneScore `shouldNotBe` playerTwoScore
+                length (filter isWinnerScore [playerOneScore, playerTwoScore]) `shouldBe` 1
+
+            it "requires every remaining chooser to resolve a revealed curse in turn" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Treasure 4, Curse], [])
+                            , rtOrder = [secondPlayerId, activePlayerId]
+                            , rtPlayerIndex = 1
+                            , rtViewing = []
+                            }
+                    playerOne =
+                        basePlayerState
+                            { amulets = 1
+                            , foundTreasures = [Treasure 4, Treasure 8, Treasure 6, Treasure 8]
+                            }
+                    playerTwo =
+                        secondBasePlayerState
+                            { foundTreasures = [Treasure 3, Treasure 7, Treasure 5, Treasure 7]
+                            }
+                    initialState =
+                        baseGameState
+                            { players = [playerOne, playerTwo]
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    stateAfterPass = fst (makeMove initialState RaisingTreasurePass)
+                    treasureAfterPass = getRaisingTreasureState stateAfterPass
+                    stateAfterPlayerTwoAccept = fst (makeMove stateAfterPass RaisingTreasureAcceptCurse)
+                    treasureAfterPlayerTwoAccept = getRaisingTreasureState stateAfterPlayerTwoAccept
+                    resolvedState = fst (makeMove stateAfterPlayerTwoAccept RaisingTreasureAcceptCurse)
+                gameActivePlayer stateAfterPass `shouldBe` secondPlayerId
+                raisingTreasureChest treasureAfterPass `shouldBe` ([Curse], [Treasure 4])
+                raisingTreasureOrder treasureAfterPass `shouldBe` [secondPlayerId, activePlayerId]
+                enumerateActivePlayerOptions stateAfterPass `shouldMatchList` [RaisingTreasureAcceptCurse]
+
+                gameActivePlayer stateAfterPlayerTwoAccept `shouldBe` activePlayerId
+                raisingTreasureChest treasureAfterPlayerTwoAccept `shouldBe` ([Curse], [Treasure 4])
+                raisingTreasureOrder treasureAfterPlayerTwoAccept `shouldBe` [secondPlayerId, activePlayerId]
+                (playerStateById secondPlayerId stateAfterPlayerTwoAccept).foundTreasures
+                    `shouldMatchList` [Treasure 3, Treasure 7, Treasure 5]
+                enumerateActivePlayerOptions stateAfterPlayerTwoAccept
+                    `shouldMatchList` [RaisingTreasureAcceptCurse, RaisingTreasureWardCurse]
+
+                gameRaisingTreasure resolvedState `shouldBe` Nothing
+                (playerStateById activePlayerId resolvedState).foundTreasures
+                    `shouldMatchList` [Treasure 4, Treasure 6, Treasure 8]
+                gameActivePlayer resolvedState `shouldBe` gamePlayerTurn resolvedState
+
+            it "does not reduce any budgets for a forced opening jeep placement" $ do
+                let playerState =
+                        basePlayerState
+                            { availableJeepMoves = 3
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 1
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    boardHexes =
+                        [ (origin, TerrainHex False Meadow [])
+                        , (adjacentOrigin, TerrainHex False Jungle [])
+                        , (mkCubeCoordinate 0 1, TerrainHex False Beach [])
+                        ]
+                    initialState = (gameStateWithBoard boardHexes) { players = playerState : drop 1 baseGameState.players }
+                    resultState = fst (makeMove initialState (MoveJeep 1 0))
+                    resultPlayer = playerStateById activePlayerId resultState
+                 in do
+                    boardTokensAt adjacentOrigin resultState `shouldContain` [PlayerJeep activePlayerId]
+                    playerBudgets resultPlayer `shouldBe` playerBudgets playerState
+
+            it "includes destination tokens in the MoveJeep summary" $ do
+                let boardHexes =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (adjacentOrigin, TerrainHex True Jungle [ClueToken firstClueColor, Hut])
+                        ]
+                    initialState = gameStateWithBoard boardHexes
+                    expectedSummary = "MoveJeep " <> show (1 :: Int, 0 :: Int) <> " tokens=" <> show [ClueToken firstClueColor, Hut]
+                makeMoveSummary initialState (MoveJeep 1 0)
+                    `shouldBe` expectedSummary
+
+            it "preserves the board through a legal jeep move and the next player's legal clue play except for the moved jeep and played clue markers" $ do
+                let secondPlayerId = secondBasePlayerState.player.playerId
+                    initialBoard =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (adjacentOrigin, TerrainHex False Meadow [])
+                        , (twoStepOrigin, TerrainHex False Jungle [])
+                        , (farOrigin, TerrainHex False Beach [PlayerJeep secondPlayerId])
+                        ]
+                    initialState =
+                        (gameStateWithBoard initialBoard)
+                            { players =
+                                [ basePlayerState
+                                    { clues = []
+                                    , availableJeepMoves = 1
+                                    , availableCluePlays = 0
+                                    , availablePickupAmulet = 0
+                                    , availableClueCardExchange = 0
+                                    }
+                                , secondBasePlayerState
+                                    { clues = [IsOn (FeatureClue False Jungle)] }
+                                ]
+                            , playerTurn = activePlayerId
+                            , activePlayer = activePlayerId
+                            }
+                    normalizeBoard movedPlayerId clueColor = Map.map stripDynamicTokens
+                      where
+                        stripDynamicTokens (TerrainHex isLargest feature tokens) =
+                            TerrainHex isLargest feature (filter keepToken tokens)
+                        keepToken token = token /= PlayerJeep movedPlayerId && token /= ClueToken clueColor
+                    jeepMove = MoveJeep 1 0
+                    stateAfterJeep = fst (makeMove initialState jeepMove)
+                    stateAfterPass = fst (makeMove stateAfterJeep PassTurn)
+                    clueMove =
+                        case find isCluePlay (enumerateActivePlayerOptions stateAfterPass) of
+                            Just move -> move
+                            Nothing -> error "expected a clue play for the next player after the opening jeep move"
+                    isCluePlay PlayClue {} = True
+                    isCluePlay _ = False
+                    stateAfterClue = fst (makeMove stateAfterPass clueMove)
+                    playedColor = case clueMove of
+                        PlayClue color _ -> color
+                        _ -> error "expected clue move"
+                 in do
+                    gameActivePlayer stateAfterPass `shouldBe` secondPlayerId
+                    normalizeBoard activePlayerId playedColor (terrainBoardMap stateAfterClue)
+                        `shouldBe` normalizeBoard activePlayerId playedColor (terrainBoardMap initialState)
+
+        describe "summary" $ do
+            it "includes clue-marker counts after treasureDraw" $ do
+                let boardHexes =
+                        [ (origin, TerrainHex False Meadow [ClueToken firstClueColor])
+                        , (adjacentOrigin, TerrainHex False Jungle [ClueToken firstClueColor, ClueToken secondClueColor])
+                        ]
+                    initialState = gameStateWithBoard boardHexes
+                    result = summary initialState
+                    expectedTreasureSummary =
+                        "treasures="
+                            <> Text.intercalate ", "
+                                [ show firstClueColor <> ":2"
+                                , show secondClueColor <> ":1"
+                                , show thirdClueColor <> ":0"
+                                , show fourthClueColor <> ":0"
+                                ]
+                Text.isInfixOf "treasureDraw=" result `shouldBe` True
+                Text.isInfixOf expectedTreasureSummary result `shouldBe` True
+
+            it "includes a board hex table only on turn one" $ do
+                let boardHexes =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (adjacentOrigin, TerrainHex True Jungle [Hut])
+                        ]
+                    turnOneState = (gameStateWithBoard boardHexes) { turn = 1 }
+                    laterState = turnOneState { turn = 2 }
+                    firstBoardLine = "boardHexes=\n" <> show (toPair origin) <> " False " <> show Meadow <> " " <> show [PlayerJeep activePlayerId]
+                    secondBoardLine = show (toPair adjacentOrigin) <> " True " <> show Jungle <> " " <> show [Hut]
+                Text.isInfixOf firstBoardLine (summary turnOneState) `shouldBe` True
+                Text.isInfixOf secondBoardLine (summary turnOneState) `shouldBe` True
+                Text.isInfixOf "boardHexes=" (summary laterState) `shouldBe` False
 
             it "discards and redraws four clues for ExchangeClueCards" $ do
                 let originalClues =
@@ -986,7 +1342,7 @@ spec = do
                     resultState = runMakeMoveDirect initialState (UseAmuletPlayClue firstClueColor clueCard)
                     resultPlayer = playerStateById activePlayerId resultState
                 resultPlayer.amulets `shouldBe` 1
-                terrainBoardMap resultState `shouldBe` snd (applyClue (Map.fromList boardHexes) (firstClueColor, clueCard))
+                terrainBoardMap resultState `shouldBe` applyClueToBoardExpected (Map.fromList boardHexes) (firstClueColor, clueCard)
 
             it "exchanges clues and spends one amulet for UseAmuletExchangeCards" $ do
                 let originalClues =
@@ -1049,7 +1405,7 @@ spec = do
                 gamePlayerTurn resultState `shouldBe` secondPlayerId
                 gameActivePlayer resultState `shouldBe` activePlayerId
 
-            it "returns viewed treasure cards to the deck and advances viewers for RaisingTreasurePass in view mode" $ do
+            it "returns viewed treasure cards to the chest and advances viewers for RaisingTreasurePass in view mode" $ do
                 let secondPlayerId = mkExistingPlayerId 2
                     playerOne = basePlayerState { viewingTreasures = [Treasure 7] }
                     playerTwo = secondBasePlayerState { viewingTreasures = [Treasure 9] }
@@ -1069,7 +1425,8 @@ spec = do
                             }
                     resultState = runMakeMoveDirect initialState RaisingTreasurePass
                 (playerStateById activePlayerId resultState).viewingTreasures `shouldBe` []
-                fst (gameTreasureDeck resultState) `shouldBe` [Treasure 7, Treasure 8]
+                raisingTreasureChest (getRaisingTreasureState resultState) `shouldBe` ([Treasure 7, Treasure 4], [Curse])
+                fst (gameTreasureDeck resultState) `shouldBe` [Treasure 8]
                 raisingTreasureViewing (getRaisingTreasureState resultState) `shouldBe` [secondPlayerId]
                 gameActivePlayer resultState `shouldBe` secondPlayerId
 
@@ -1097,7 +1454,7 @@ spec = do
                     initialState = baseGameState { raisingTreasure = Just treasureState, activePlayer = activePlayerId }
                     resultState = runMakeMoveDirect initialState RaisingTreasurePass
                 raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
-                gameActivePlayer resultState `shouldBe` activePlayerId
+                gameActivePlayer resultState `shouldBe` secondPlayerId
 
             it "gives the top treasure to the active chooser and removes them from the order for RaisingTreasureTake" $ do
                 let secondPlayerId = mkExistingPlayerId 2
@@ -1134,7 +1491,7 @@ spec = do
                     resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
                 (playerStateById activePlayerId resultState).amulets `shouldBe` 1
                 raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
-                gameActivePlayer resultState `shouldBe` activePlayerId
+                gameActivePlayer resultState `shouldBe` secondPlayerId
 
             it "finishes treasure raising after the last chooser wards a curse" $ do
                 let playerState = basePlayerState { amulets = 2 }
@@ -1175,7 +1532,7 @@ spec = do
                     resultState = runMakeMoveDirect initialState RaisingTreasureAcceptCurse
                 (playerStateById activePlayerId resultState).foundTreasures `shouldMatchList` [Treasure 3, Treasure 7, Treasure 5]
                 raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
-                gameActivePlayer resultState `shouldBe` activePlayerId
+                gameActivePlayer resultState `shouldBe` secondPlayerId
 
             it "finishes treasure raising after the last chooser accepts a curse" $ do
                 let playerState = basePlayerState { foundTreasures = [Treasure 4] }
@@ -1280,11 +1637,20 @@ mkExistingPlayerId playerNumber =
 activePlayerId :: PlayerId
 activePlayerId = mkExistingPlayerId 1
 
+secondPlayerId :: PlayerId
+secondPlayerId = mkExistingPlayerId 2
+
 firstClueColor :: ClueColor
 firstClueColor =
     case allClueColors of
         color : _ -> color
         [] -> error "Expected at least one clue color"
+
+blackClueColor :: ClueColor
+blackClueColor =
+    case mkClueColor Black of
+        Just color -> color
+        Nothing -> error "Expected black to be a valid clue color"
 
 secondClueColor :: ClueColor
 secondClueColor =
@@ -1409,6 +1775,89 @@ placeJeep playerId = Map.adjust addPlayerJeep
         TerrainHex isLargest feature (PlayerJeep playerId : filter (not . isPlayerJeep) tokens)
     isPlayerJeep (PlayerJeep _) = True
     isPlayerJeep _ = False
+
+stackJeep :: PlayerId -> CubeCoordinate Int -> HexMap -> HexMap
+stackJeep playerId = Map.adjust addPlayerJeep
+    where
+        addPlayerJeep (TerrainHex isLargest feature tokens) =
+                TerrainHex isLargest feature (PlayerJeep playerId : filter (/= PlayerJeep playerId) tokens)
+
+placeClueMarker :: ClueColor -> CubeCoordinate Int -> HexMap -> HexMap
+placeClueMarker color = Map.adjust addClueMarker
+    where
+        addClueMarker (TerrainHex isLargest feature tokens) =
+                TerrainHex isLargest feature (ClueToken color : filter (/= ClueToken color) tokens)
+
+blackTreasureRaiseSetupState :: GameState
+blackTreasureRaiseSetupState =
+        seededGameState
+                { players = [playerOneWithTreasures, playerTwoWithTreasures]
+                , terrainBoard = CubeCoordinateTokens (toHourHand (0 :: Int)) boardWithCenterStack
+                , treasureBoards = replaceTreasureBoard blackClueColor blackTreasureBoard seededGameState.treasureBoards
+                , activePlayer = activePlayerId
+                , playerTurn = activePlayerId
+                }
+    where
+        seededGameState = fst $ createNewGame (take 2 getGameSetupPlayers) 12345
+        playerOneStart = playerStateById activePlayerId seededGameState
+        playerTwoStart = playerStateById secondPlayerId seededGameState
+        (playerOneMovedClues, playerOneRemainingClues) = splitAt 2 playerOneStart.clues
+        (playerTwoMovedClues, playerTwoRemainingClues) = splitAt 1 playerTwoStart.clues
+        playerOneWithTreasures = playerOneStart { clues = playerOneRemainingClues }
+        playerTwoWithTreasures = playerTwoStart { clues = playerTwoRemainingClues }
+        blackTreasureBoard =
+                case (playerOneMovedClues, playerTwoMovedClues) of
+                    ([firstPlayerOneClue, secondPlayerOneClue], [secondPlayerClue]) ->
+                        [ (activePlayerId, firstPlayerOneClue)
+                        , (secondPlayerId, secondPlayerClue)
+                        , (activePlayerId, secondPlayerOneClue)
+                        ]
+                    _ -> error "Expected two player-one clues and one player-two clue for weighted black treasure setup"
+        boardWithCenterStack =
+                placeClueMarker blackClueColor origin
+                $ stackJeep secondPlayerId origin
+                $ stackJeep activePlayerId origin
+                        $ terrainBoardMap seededGameState
+
+blackTreasureGameOverSetupState :: GameState
+blackTreasureGameOverSetupState =
+        seededGameState
+                { players = [playerOneWithTreasures, playerTwoWithTreasures]
+                , terrainBoard = CubeCoordinateTokens (toHourHand (0 :: Int)) boardWithCenterStack
+                , treasureBoards = replaceTreasureBoard blackClueColor blackTreasureBoard seededGameState.treasureBoards
+                , treasureDeck = ([Treasure 6, Treasure 5, Treasure 4, Treasure 3, Treasure 2], [])
+                , activePlayer = activePlayerId
+                , playerTurn = activePlayerId
+                }
+    where
+        seededGameState = fst $ createNewGame (take 2 getGameSetupPlayers) 12345
+        playerOneStart = playerStateById activePlayerId seededGameState
+        playerTwoStart = playerStateById secondPlayerId seededGameState
+        (playerOneMovedClues, playerOneRemainingClues) = splitAt 1 playerOneStart.clues
+        (playerTwoMovedClues, playerTwoRemainingClues) = splitAt 2 playerTwoStart.clues
+        playerOneWithTreasures = playerOneStart { clues = playerOneRemainingClues }
+        playerTwoWithTreasures = playerTwoStart { clues = playerTwoRemainingClues }
+        blackTreasureBoard =
+                case (playerOneMovedClues, playerTwoMovedClues) of
+                    ([playerOneClue], [firstPlayerTwoClue, secondPlayerTwoClue]) ->
+                        [ (secondPlayerId, firstPlayerTwoClue)
+                        , (activePlayerId, playerOneClue)
+                        , (secondPlayerId, secondPlayerTwoClue)
+                        ]
+                    _ -> error "Expected one clue from player one and two clues from player two for weighted black treasure game-over setup"
+        boardWithCenterStack =
+                placeClueMarker blackClueColor origin
+                $ stackJeep secondPlayerId origin
+                $ stackJeep activePlayerId origin
+                        $ terrainBoardMap seededGameState
+
+replaceTreasureBoard :: ClueColor -> ClueBoard -> [TreasureBoard] -> [TreasureBoard]
+replaceTreasureBoard color clueBoard treasureBoards =
+        map replaceBoard treasureBoards
+    where
+        replaceBoard (boardColor, existingBoard)
+                | boardColor == color = (boardColor, clueBoard)
+                | otherwise = (boardColor, existingBoard)
 
 createNewGamePlayerCountMatches :: Int -> Int -> Bool
 createNewGamePlayerCountMatches playerCount randomSeed =
@@ -1762,6 +2211,10 @@ playerBudgets playerState =
     , playerState.availableClueCardExchange
     )
 
+isWinnerScore :: Score -> Bool
+isWinnerScore WinnerScore {} = True
+isWinnerScore _ = False
+
 startTurnBudget :: (Int, Int, Int, Int, Int)
 startTurnBudget = (3, 1, 0, 1, 1)
 
@@ -1777,6 +2230,21 @@ terrainBoardMapFromBoard :: HexBoard -> HexMap
 terrainBoardMapFromBoard hexBoard =
     case hexBoard of
         CubeCoordinateTokens _ boardMap -> boardMap
+
+applyClueToBoardExpected :: HexMap -> (ClueColor, ClueCard) -> HexMap
+applyClueToBoardExpected board (color, card) = foldr updateMarker board markerCoords
+        where
+                (beforeMarkers, afterMarkers) = applyClue board (color, card)
+                markerCoords = Map.keys (Map.union beforeMarkers afterMarkers)
+                updateMarker coord = Map.adjust updateHex coord
+                    where
+                        updateHex (TerrainHex isLargest feature tokens) =
+                                TerrainHex isLargest feature updatedTokens
+                            where
+                                withoutColor = filter (/= ClueToken color) tokens
+                                updatedTokens
+                                        | Map.member coord afterMarkers = ClueToken color : withoutColor
+                                        | otherwise = withoutColor
 
 boardMissingOcean :: HexMap
 boardMissingOcean = bareBoard1.board

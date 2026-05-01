@@ -4,6 +4,7 @@ module Game.Core.API
     , enumerateActivePlayerOptions
     , makeMove
     , heuristicHint
+    , summary
     )
 where
 
@@ -93,6 +94,13 @@ heuristicHint level gameState playerMoves =
             | Just rulesetMoves <- traverse unwrapRealEstateMove moves ->
                 map (fmap Core.RealEstatePlayerMove) (RealEstate.heuristicHint level rulesetState rulesetMoves)
         _ -> error "PlayerMove list does not match GameState ruleset."
+
+summary :: Core.GameState -> Text
+summary = \case
+    Core.CursedTreasureGame gameState -> CursedTreasure.summary gameState
+    Core.FogOfBattleGame gameState -> FogOfBattle.summary gameState
+    Core.ArtOfWarGame gameState -> ArtOfWar.summary gameState
+    Core.RealEstateGame gameState -> RealEstate.summary gameState
 
 makeMove :: Core.GameState -> Core.PlayerMove -> (Core.GameState, [Core.CensoredGameState])
 makeMove gameState playerMove =
