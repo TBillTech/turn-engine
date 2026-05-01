@@ -14,6 +14,7 @@ module Game.Core.Primitives
     , adjacentCubeCoordinates
     , isUnitCubeDist
     , cubeCoordinateDistance
+    , cubeCoordinateDistFloor
     , toXYScaledOrientation
     , radiusOneCubeCoordinates
     , radiusTwoCubeCoordinates
@@ -198,6 +199,9 @@ cubeCoordinateDistance (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) =
     sqrt (realToFrac $ dq*dq + dq*dr + dr*dr)
     where   dq = q_a - q_b
             dr = r_a - r_b
+
+cubeCoordinateDistFloor :: Integral c => CubeCoordinate c -> CubeCoordinate c -> c
+cubeCoordinateDistFloor coordA coordB = floor (cubeCoordinateDistance coordA coordB)
 
 isUnitCubeDist :: Real c => CubeCoordinate c -> CubeCoordinate c -> Bool
 isUnitCubeDist (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) =

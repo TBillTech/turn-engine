@@ -6,12 +6,11 @@ where
 
 import Data.Aeson (decodeStrict', encode)
 import qualified Data.ByteString.Char8 as StrictByteString
-import qualified Data.ByteString.Lazy as LazyByteString
-import System.IO (stdin, stdout)
 
 import qualified Game.Core.API as Core
 
 import App.Protocol
+import GHC.IO.Handle (isEOF)
 
 handleRequest :: ServiceRequest -> ServiceResponse
 handleRequest = \case
@@ -26,16 +25,16 @@ runService :: IO ()
 runService = loop
   where
     loop = do
-        isDone <- hIsEOF stdin
+        isDone <- isEOF
         unless isDone $ do
             inputLine <- StrictByteString.hGetLine stdin
-            StrictByteString.putStrLn (encodeResponse inputLine)
+            putBSLn (encodeResponse inputLine)
             hFlush stdout
             loop
 
 encodeResponse :: StrictByteString.ByteString -> StrictByteString.ByteString
 encodeResponse inputLine =
-    LazyByteString.toStrict . encode $
+    toStrict . encode $
         case decodeStrict' inputLine of
             Nothing -> ServiceError "Invalid request JSON."
             Just request -> handleRequest request
