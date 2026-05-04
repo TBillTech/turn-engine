@@ -74,6 +74,7 @@ import Game.CursedTreasure.Types
     )
 import Game.Core.Primitives
     ( adjacentCubeCoordinates
+    , FromHourHand (..)
     , mkCubeCoordinate
     , cubeCoordinateDistance
     , cubeCoordinateDistFloor
@@ -872,6 +873,12 @@ passTurnOption :: (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
 passTurnOption (GameModeNominal, moves) = (GameModeNominal, PassTurn:moves)
 passTurnOption modeMoves = modeMoves
 
+-- | Adds clue-card exchange when the active player still has exchange budget.
+exchangeClueCardsOption :: PlayerState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
+exchangeClueCardsOption player (GameModeNominal, moves)
+    | player.availableClueCardExchange > 0 = (GameModeNominal, ExchangeClueCards:moves)
+exchangeClueCardsOption _ modeMoves = modeMoves
+
 -- | Switches the option enumeration mode when a treasure-raising sequence is active.
 isRaisingTreasure :: GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
 isRaisingTreasure gS (mode, moves) = case gS.raisingTreasure of
@@ -1020,21 +1027,35 @@ enumeratePossibleCluePlays player gS (GameModeNominal, moves) = (GameModeNominal
                 length before > length after && not (null after)
 enumeratePossibleCluePlays _ _ gMoves = gMoves
 
+terrainFeatureAt :: CubeCoordinate Int -> GameState -> Maybe Feature
+terrainFeatureAt coord gS = featureAt <$> Map.lookup coord (getHexMap gS.terrainBoard)
+    where featureAt (TerrainHex _ feature _) = feature
+
+jeepMoveCost :: Maybe Feature -> Feature -> Int
+jeepMoveCost (Just Ocean) destination
+    | destination /= Ocean = 2
+jeepMoveCost sourceFeature Ocean
+    | sourceFeature /= Just Ocean = 3
+jeepMoveCost _ _ = 1
+
 -- | Adds legal jeep moves, falling back to unconstrained placement if the jeep is missing.
 enumeratePossibleJeepMoves :: PlayerState -> GameState -> (GameMode, [PlayerMove]) -> (GameMode, [PlayerMove])
 enumeratePossibleJeepMoves player gS (GameModeNominal, moves)
     | player.availableJeepMoves == 0 = (GameModeNominal, moves)
     | null oneLeg = (GameModeMustMoveJeep, map toMove unconstrained)
     | otherwise = (GameModeNominal, map toMove oneLeg)
-    where   connectedSets = concatMap snd (filter ((Ocean /=) . fst) $ getConnectedSets (getHexMap gS.terrainBoard))
+    where   connectedSets = concatMap snd (getConnectedSets (getHexMap gS.terrainBoard))
             jeepHex = findFirstToken (PlayerJeep player.player.playerId) (getHexMap gS.terrainBoard)
-            oneLeg = case jeepHex of (Just (k, _)) -> toList $ Set.delete k (legSet k)
-                                     Nothing -> []
+            oneLeg = case jeepHex of
+                Just (k, _) ->
+                    let sourceFeature = terrainFeatureAt k gS
+                     in toList $ Set.filter (isAffordableMove sourceFeature) (Set.delete k (legSet k))
+                Nothing -> []
             legSet k = Set.intersection boardCoords $ Set.unions $ adjacentCoords : territorySets
                 where   adjacentCoords = distanceSet 1 (one k)
                         territorySets = map (fromList . keys) (filter (member k) connectedSets)
-            boardCoords = fromList $ keys $ Map.filter isNonOceanHex (getHexMap gS.terrainBoard)
-            isNonOceanHex (TerrainHex _ feature _) = feature /= Ocean
+            boardCoords = fromList $ keys $ getHexMap gS.terrainBoard
+            isAffordableMove sourceFeature coord = maybe False ((<= player.availableJeepMoves) . jeepMoveCost sourceFeature) (terrainFeatureAt coord gS)
             unconstrained = map fst $ filter ((\(TerrainHex _ f _) -> f /= Ocean) . snd) $
                 toPairs (getHexMap gS.terrainBoard)
             toMove coord = uncurry MoveJeep (toPair coord)
@@ -1045,6 +1066,7 @@ enumeratePossibleJeepMoves _ _ gMoves = gMoves
 enumeratePlayerOptions :: PlayerState -> GameState -> (GameMode, [PlayerMove])
 enumeratePlayerOptions player gS = foldr ($) (GameModeNominal, []) enumerators
     where   enumerators =   [ passTurnOption
+                            , exchangeClueCardsOption player
                             , enumeratePossibleCluePlays player gS
                             , useAmuletCase player gS
                             , pickupAmuletCase player gS
@@ -1150,12 +1172,52 @@ raiseTreasureShuffle s =
 -- | Ends the treasure-raising sequence, recalculates scores, and marks winners if the chest is empty.
 raiseTreasureFinished :: GameState -> GameState
 raiseTreasureFinished s =
-    s & clearRaising & setActivePlayer & playersL %~ (scorePlayer <$>) & checkGameWinner
+    s & boardL %~ refreshStatueAmulets
+      & clearRaising
+      & setActivePlayer
+      & playersL %~ (scorePlayer <$>)
+      & checkGameWinner
     where   mCards :: Maybe (NonEmpty TreasureCard)
             mCards = do
                 raising <- s.raisingTreasure
                 nonEmpty (fst raising.rtTreasureChest)
             clearRaising gS = gS { raisingTreasure = Nothing }
+            refreshStatueAmulets board = foldr applyStatueEffect board (statueLocations board)
+            applyStatueEffect (coord, hourHand) board = addFinalAmulet coord hourHand (rotateStatue coord hourHand board)
+            rotateStatue coord hourHand = alterTokenList (map rotateToken) (Just coord)
+                where
+                    rotatedHourHand = toHourHand (fromHourHand hourHand + (2 :: Int))
+                    rotateToken (Statue tokenHourHand)
+                        | tokenHourHand == hourHand = Statue rotatedHourHand
+                    rotateToken token = token
+            addFinalAmulet coord hourHand board = case reverse (amuletRay coord hourHand board) of
+                finalCoord : _ -> addAmulet finalCoord board
+                [] -> board
+            addAmulet rayCoord = alterTokenList addAmuletToken (Just rayCoord)
+                where
+                    addAmuletToken tokens
+                        | Amulet `elem` tokens = tokens
+                        | otherwise = Amulet : tokens
+            amuletRay coord hourHand board = takeWhile (not . isOceanHex board) $ drop 1 $ iterate (stepCoord hourHand) coord
+            isOceanHex board coord = maybe False ((== Ocean) . hexFeature) (Map.lookup coord board)
+            hexFeature (TerrainHex _ feature _) = feature
+            stepCoord hourHand = uncurry mkCubeCoordinate . bimap (+ dq) (+ dr) . toPair
+                where
+                    (dq, dr) = statueDirection hourHand
+            statueDirection hourHand = case (fromHourHand hourHand :: Int) `mod` 12 of
+                1 -> (0, 1)
+                3 -> (1, 0)
+                5 -> (1, -1)
+                7 -> (0, -1)
+                9 -> (-1, 0)
+                11 -> (-1, 1)
+                _ -> (0, 0)
+            statueLocations board = mapMaybe statueAt (toPairs board)
+            statueAt (coord, TerrainHex _ _ tokens) = case mapMaybe asHourHand tokens of
+                hourHand : _ -> Just (coord, hourHand)
+                [] -> Nothing
+            asHourHand (Statue hourHand) = Just hourHand
+            asHourHand _ = Nothing
             toInt (Treasure i) = i
             toInt _ = 0
             score player = player.amulets + 10 * sum (map toInt player.foundTreasures)
@@ -1304,9 +1366,13 @@ makeMoveDirect gS (MoveJeep i j) = censorGame $
     gS & moveJeepDirect i j & playerL pId %~ playerUsedOptions
     where   pId = gS.activePlayer
             isForcedPlacement = isNothing $ findFirstToken (PlayerJeep pId) (getHexMap gS.terrainBoard)
+            mSourceFeature = do
+                (coord, _) <- findFirstToken (PlayerJeep pId) (getHexMap gS.terrainBoard)
+                terrainFeatureAt coord gS
+            moveCost = fromMaybe 1 $ jeepMoveCost mSourceFeature <$> terrainFeatureAt (mkCubeCoordinate i j) gS
             playerUsedOptions
                 | isForcedPlacement = id
-                | otherwise = \player -> player { availableJeepMoves = player.availableJeepMoves - 1
+                | otherwise = \player -> player { availableJeepMoves = player.availableJeepMoves - moveCost
                                                 , availableCluePlays = 0
                                                 , availableRemoveMarkers = 0
                                                 , availableClueCardExchange = 0}
@@ -1421,7 +1487,7 @@ heuristicHint level gS = map heuristicLevel
             heuristic _ (PlayerMoveError _) = 0
             heuristic _ PassTurn = -10
             heuristic _ (PlayClue color card) = if null singleMarkers then reduction gS.terrainBoard color card else 0
-            heuristic _ ExchangeClueCards = if null singleMarkers then 8 else -4
+            heuristic _ ExchangeClueCards = if null singleMarkers then 1 else -4
             heuristic _ PickupAmulet = 11
             heuristic _ UseAmuletIncrMove = -11
             heuristic _ (UseAmuletPlayClue _ _) = -11
@@ -1451,8 +1517,8 @@ heuristicHint level gS = map heuristicLevel
             -- minDistTo computes the minimum distance between the hex at (i, j)
             -- and the nearest hex with one of the colors in colors on the HexMap board
             minDistTo tFilt board i j
-                | any tFilt destinationTokens = -200
-                | otherwise = fromMaybe 40 nearestDistance
+                | any tFilt destinationTokens = 200
+                | otherwise = fromMaybe 50 nearestDistance
                 where
                     destinationTokens = getTokens i j board
                     targetCoords =
@@ -1462,8 +1528,8 @@ heuristicHint level gS = map heuristicLevel
                     targetBoard = findLocations hasTargetToken hexMap
                     hasTargetToken _ (TerrainHex _ _ ts) = any tFilt ts
                     nearestDistance =
-                        viaNonEmpty (floor . negate . maximum1)
-                            ([ negate (cubeCoordinateDistance (mkCubeCoordinate i j) coord)
+                        viaNonEmpty (negate . maximum1)
+                            ([ negate (cubeCoordinateDistFloor (mkCubeCoordinate i j) coord)
                              | coord <- targetCoords ])
                     hexMap = getHexMap board
             colorCounts = zip allClueColors $ map (countTokens gS . (==) . ClueToken) allClueColors

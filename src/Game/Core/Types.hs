@@ -44,4 +44,4 @@ data CensoredGameState
     | FogOfBattleCensoredGameState FogOfBattle.CensoredGameState
     | ArtOfWarCensoredGameState ArtOfWar.CensoredGameState
     | RealEstateCensoredGameState RealEstate.CensoredGameState
-    deriving (Show, Eq, Generic, ToJSON)
+    deriving (Show, Eq, Generic, FromJSON, ToJSON)

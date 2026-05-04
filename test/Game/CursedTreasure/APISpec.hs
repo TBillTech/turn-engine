@@ -309,10 +309,12 @@ spec = do
                     case requestedPlayers of
                         firstPlayer : _ -> firstPlayer.playerId
                         [] -> error "expected first player"
+                firstPlayerExchangeBudget = (playerStateById firstPlayerId gameState).availableClueCardExchange
              in do
                 gameState.turn `shouldBe` 1
                 gameState.playerTurn `shouldBe` firstPlayerId
                 gameState.activePlayer `shouldBe` firstPlayerId
+                firstPlayerExchangeBudget `shouldBe` 1
                 map playerBudgets gameState.players `shouldBe`
                     [ startTurnBudget
                     , zeroTurnBudget
@@ -327,10 +329,12 @@ spec = do
                     case requestedPlayers of
                         _ : secondPlayer : _ -> secondPlayer.playerId
                         _ -> error "expected second player"
+                secondPlayerExchangeBudget = (playerStateById expectedSecondPlayerId nextGameState).availableClueCardExchange
              in do
                 nextGameState.turn `shouldBe` 2
                 nextGameState.playerTurn `shouldBe` expectedSecondPlayerId
                 nextGameState.activePlayer `shouldBe` expectedSecondPlayerId
+                secondPlayerExchangeBudget `shouldBe` 1
                 map playerBudgets nextGameState.players `shouldBe`
                     [ zeroTurnBudget
                     , startTurnBudget
@@ -657,6 +661,7 @@ spec = do
                             ]
                     expectedMoves =
                         [ PassTurn
+                        , ExchangeClueCards
                         , PickupAmulet
                         , RaiseTreasure firstClueColor
                         , MoveJeep 1 0
@@ -665,6 +670,22 @@ spec = do
                  in do
                     mode `shouldBe` GameModeNominal
                     moves `shouldMatchList` expectedMoves
+
+            it "adds ExchangeClueCards when availableClueCardExchange is greater than 0" $ do
+                let playerState =
+                        basePlayerState
+                            { amulets = 0
+                            , clues = []
+                            , availableJeepMoves = 0
+                            , availableCluePlays = 0
+                            , availablePickupAmulet = 0
+                            , availableClueCardExchange = 2
+                            }
+                    gameState = gameStateWithBoard [(origin, TerrainHex False Meadow [PlayerJeep activePlayerId])]
+                    (mode, moves) = enumeratePlayerOptions playerState gameState
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` [PassTurn, ExchangeClueCards]
 
             it "does not add ExchangeClueCards when availableClueCardExchange is 0" $ do
                 let playerState =
@@ -771,6 +792,48 @@ spec = do
                  in do
                     mode `shouldBe` GameModeNominal
                     moves `shouldMatchList` expectedMoves
+
+            it "does not offer Ocean moves from land when fewer than 3 jeep moves remain" $ do
+                let playerState = basePlayerState { availableJeepMoves = 2 }
+                    boardHexes =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (adjacentOrigin, TerrainHex False Jungle [])
+                        , (mkCubeCoordinate (-1) 0, TerrainHex True Ocean [])
+                        ]
+                    gameState = gameStateWithBoard boardHexes
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` [MoveJeep 1 0]
+
+            it "offers adjacent Ocean moves from land when 3 jeep moves remain" $ do
+                let playerState = basePlayerState { availableJeepMoves = 3 }
+                    oceanCoord = mkCubeCoordinate (-1) 0
+                    boardHexes =
+                        [ (origin, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (adjacentOrigin, TerrainHex False Jungle [])
+                        , (oceanCoord, TerrainHex True Ocean [])
+                        ]
+                    gameState = gameStateWithBoard boardHexes
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` [MoveJeep 1 0, MoveJeep (-1) 0]
+
+            it "offers Ocean travel plus adjacent land exits when starting on Ocean with 2 jeep moves" $ do
+                let playerState = basePlayerState { availableJeepMoves = 2 }
+                    farOcean = mkCubeCoordinate 0 1
+                    landExit = mkCubeCoordinate 1 0
+                    boardHexes =
+                        [ (origin, TerrainHex True Ocean [PlayerJeep activePlayerId])
+                        , (farOcean, TerrainHex True Ocean [])
+                        , (landExit, TerrainHex False Jungle [])
+                        ]
+                    gameState = gameStateWithBoard boardHexes
+                    (mode, moves) = enumeratePossibleJeepMoves playerState gameState (GameModeNominal, [PassTurn])
+                 in do
+                    mode `shouldBe` GameModeNominal
+                    moves `shouldMatchList` [MoveJeep 0 1, MoveJeep 1 0]
 
             it "on canned board #4 offers exactly the first territory when the jeep is fully inside it" $ do
                 let playerState = basePlayerState { availableJeepMoves = 1 }
@@ -1007,6 +1070,52 @@ spec = do
                     boardTokensAt jeepCoord resultState `shouldNotContain` [PlayerJeep activePlayerId]
                     boardTokensAt destination resultState `shouldContain` [PlayerJeep activePlayerId]
                     playerBudgets resultPlayer `shouldBe` (1, 0, 0, 1, 0)
+
+            it "spends 3 jeep moves when moving from land onto Ocean" $ do
+                let jeepCoord = origin
+                    oceanCoord = mkCubeCoordinate (-1) 0
+                    playerState =
+                        basePlayerState
+                            { availableJeepMoves = 3
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 1
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    boardHexes =
+                        [ (jeepCoord, TerrainHex False Meadow [PlayerJeep activePlayerId])
+                        , (oceanCoord, TerrainHex True Ocean [])
+                        ]
+                    initialState = (gameStateWithBoard boardHexes) { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState (MoveJeep (-1) 0)
+                    resultPlayer = playerStateById activePlayerId resultState
+                 in do
+                    boardTokensAt jeepCoord resultState `shouldNotContain` [PlayerJeep activePlayerId]
+                    boardTokensAt oceanCoord resultState `shouldContain` [PlayerJeep activePlayerId]
+                    playerBudgets resultPlayer `shouldBe` (0, 0, 0, 1, 0)
+
+            it "spends 2 jeep moves when moving from Ocean onto land" $ do
+                let oceanCoord = origin
+                    destination = adjacentOrigin
+                    playerState =
+                        basePlayerState
+                            { availableJeepMoves = 2
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 1
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    boardHexes =
+                        [ (oceanCoord, TerrainHex True Ocean [PlayerJeep activePlayerId])
+                        , (destination, TerrainHex False Jungle [])
+                        ]
+                    initialState = (gameStateWithBoard boardHexes) { players = playerState : drop 1 baseGameState.players }
+                    resultState = runMakeMoveDirect initialState (MoveJeep 1 0)
+                    resultPlayer = playerStateById activePlayerId resultState
+                 in do
+                    boardTokensAt oceanCoord resultState `shouldNotContain` [PlayerJeep activePlayerId]
+                    boardTokensAt destination resultState `shouldContain` [PlayerJeep activePlayerId]
+                    playerBudgets resultPlayer `shouldBe` (0, 0, 0, 1, 0)
 
         describe "heuristicHint" $ do
             it "scores MoveJeep as -11 when landing directly on an amulet" $ do
@@ -1602,6 +1711,61 @@ spec = do
                 gameRaisingTreasure resultState `shouldBe` Nothing
                 gameActivePlayer resultState `shouldBe` gamePlayerTurn resultState
 
+            it "adds one amulet per statue on the last land hex before Ocean and rotates statues 2 hours clockwise when treasure raising finishes" $ do
+                let playerState = basePlayerState { amulets = 2 }
+                    eastStatue = mkCubeCoordinate 0 0
+                    eastRay1 = mkCubeCoordinate 1 0
+                    eastRay2 = mkCubeCoordinate 2 0
+                    eastOcean = mkCubeCoordinate 3 0
+                    southeastStatue = mkCubeCoordinate 0 3
+                    southeastRay1 = mkCubeCoordinate 1 2
+                    southeastRay2 = mkCubeCoordinate 2 1
+                    southeastOcean = mkCubeCoordinate 3 0
+                    westStatue = mkCubeCoordinate 0 (-2)
+                    westRay1 = mkCubeCoordinate (-1) (-2)
+                    westRay2 = mkCubeCoordinate (-2) (-2)
+                    westOcean = mkCubeCoordinate (-3) (-2)
+                    boardHexes =
+                        [ (eastStatue, TerrainHex False Meadow [Statue (toHourHand (3 :: Int))])
+                        , (eastRay1, TerrainHex False Meadow [])
+                        , (eastRay2, TerrainHex False Meadow [Hut])
+                        , (eastOcean, TerrainHex True Ocean [])
+                        , (southeastStatue, TerrainHex False Jungle [Statue (toHourHand (5 :: Int))])
+                        , (southeastRay1, TerrainHex False Jungle [PalmTree])
+                        , (southeastRay2, TerrainHex False Jungle [])
+                        , (southeastOcean, TerrainHex True Ocean [])
+                        , (westStatue, TerrainHex False Beach [Statue (toHourHand (9 :: Int))])
+                        , (westRay1, TerrainHex False Beach [])
+                        , (westRay2, TerrainHex False Beach [ClueToken firstClueColor])
+                        , (westOcean, TerrainHex True Ocean [])
+                        ]
+                    treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse], [])
+                            , rtOrder = [activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = []
+                            }
+                    initialState =
+                        (gameStateWithBoard boardHexes)
+                            { players = playerState : drop 1 baseGameState.players
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
+                boardTokensAt eastStatue resultState `shouldBe` [Statue (toHourHand (5 :: Int))]
+                boardTokensAt southeastStatue resultState `shouldBe` [Statue (toHourHand (7 :: Int))]
+                boardTokensAt westStatue resultState `shouldBe` [Statue (toHourHand (11 :: Int))]
+                boardTokensAt eastRay1 resultState `shouldNotContain` [Amulet]
+                boardTokensAt eastRay2 resultState `shouldMatchList` [Amulet, Hut]
+                boardTokensAt southeastRay1 resultState `shouldBe` [PalmTree]
+                boardTokensAt southeastRay2 resultState `shouldContain` [Amulet]
+                boardTokensAt westRay1 resultState `shouldNotContain` [Amulet]
+                boardTokensAt westRay2 resultState `shouldMatchList` [Amulet, ClueToken firstClueColor]
+                boardTokensAt eastOcean resultState `shouldNotContain` [Amulet]
+                boardTokensAt southeastOcean resultState `shouldNotContain` [Amulet]
+                boardTokensAt westOcean resultState `shouldNotContain` [Amulet]
+
             it "removes one highest treasure and advances for RaisingTreasureAcceptCurse" $ do
                 let player2Id = mkExistingPlayerId 2
                     playerState = basePlayerState { foundTreasures = [Treasure 3, Treasure 7, Treasure 7, Treasure 5] }
@@ -1941,8 +2105,7 @@ blackTreasureGameOverSetupState =
                         $ terrainBoardMap seededGameState
 
 replaceTreasureBoard :: ClueColor -> ClueBoard -> [TreasureBoard] -> [TreasureBoard]
-replaceTreasureBoard color clueBoard treasureBoards =
-        map replaceBoard treasureBoards
+replaceTreasureBoard color clueBoard = map replaceBoard
     where
         replaceBoard (boardColor, existingBoard)
                 | boardColor == color = (boardColor, clueBoard)
@@ -2434,7 +2597,7 @@ threeSingletonLagoonSpecs =
 
 countTokenLike :: (TerrainToken -> Bool) -> HexMap -> Int
 countTokenLike matches =
-    length . filter matches . concatMap (\(TerrainHex _ _ tokens) -> tokens) . Map.elems
+    length . concatMap (filter matches . (\(TerrainHex _ _ tokens) -> tokens)) . Map.elems
 
 noAdjacentCopies :: (TerrainToken -> Bool) -> HexMap -> Bool
 noAdjacentCopies matches boardMap = all notAdjacent tokenCoords
@@ -2445,7 +2608,7 @@ noAdjacentCopies matches boardMap = all notAdjacent tokenCoords
         , any matches tokens
         ]
     notAdjacent coord =
-        all (not . isUnitCubeDist coord) (filter (/= coord) tokenCoords)
+        not (any (isUnitCubeDist coord) (filter (/= coord) tokenCoords))
 
 isStatueToken :: TerrainToken -> Bool
 isStatueToken (Statue _) = True

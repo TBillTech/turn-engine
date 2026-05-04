@@ -52,9 +52,8 @@ runDumbPlay :: Int -> RulesetName -> IO DumbPlayStats
 runDumbPlay gameCount rulesetName =
     foldlM playAndAccumulate emptyStats [0 .. gameCount - 1]
   where
-    playAndAccumulate stats index = do
-        gameResult <- simulateGame (gameCount == 1) rulesetName (mkStdGen index)
-        pure (accumulateResult stats gameResult)
+    playAndAccumulate stats index =
+        accumulateResult stats <$> simulateGame (index == gameCount - 1) rulesetName (mkStdGen index)
     emptyStats = DumbPlayStats
         { gamesRequested = gameCount
         , gamesCompleted = 0

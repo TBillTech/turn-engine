@@ -213,7 +213,7 @@ instance ToGameState GameState where
 
 newtype CensoredGameState = CensoredGameState GameState
     deriving stock (Show, Eq, Generic)
-    deriving newtype (ToJSON)
+    deriving newtype (FromJSON, ToJSON)
 
 mkCensoredGameState :: GameState -> PlayerId -> CensoredGameState
 mkCensoredGameState g viewerId =

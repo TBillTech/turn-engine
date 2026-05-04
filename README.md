@@ -10,3 +10,5 @@ Quick commands:
 - `cabal build all`
 - `cabal test`
 - `cabal run turn-engine`
+
+Protocol examples for the stdio service boundary are documented in [docs/service-protocol.md](docs/service-protocol.md).
