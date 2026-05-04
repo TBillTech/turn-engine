@@ -9,7 +9,6 @@ $absoluteOutputDir = Join-Path $repoRoot $OutputDir
 $stageDir = Join-Path $absoluteOutputDir "package"
 $docsSourceDir = Join-Path $repoRoot "docs"
 $jsonExamplesDir = Join-Path $docsSourceDir "jsonexamples"
-$zipPath = Join-Path $absoluteOutputDir "turn-engine-release.zip"
 $checksumFileName = "jsonexamples.sha256"
 $checksumDigestFileName = "jsonexamples.sha256.sha256"
 
@@ -78,6 +77,23 @@ function Write-ChecksumDigestFile {
     Set-Content -Path $DestinationFile -Value "$hash  $sourceFileName"
 }
 
+function Get-ExecutableVersion {
+    param(
+        [string]$ExecutablePath
+    )
+
+    $version = (& $ExecutablePath --version).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed: $ExecutablePath --version"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "Executable version output was empty."
+    }
+
+    return $version
+}
+
 Push-Location $repoRoot
 try {
     Invoke-Step "Build" {
@@ -99,6 +115,10 @@ try {
     if (-not (Test-Path $exePath)) {
         throw "Could not find built executable at '$exePath'."
     }
+
+    $version = Get-ExecutableVersion -ExecutablePath $exePath
+    $zipFileName = "turn-engine-release-$version.zip"
+    $zipPath = Join-Path $absoluteOutputDir $zipFileName
 
     if (Test-Path $stageDir) {
         Remove-Item $stageDir -Recurse -Force
