@@ -17,6 +17,8 @@ data Command
     = DumbPlay Int RulesetName
     | Example RulesetName ExampleMode
     | Service
+    | Version
+    | TestExample FilePath FilePath
     | Help Text
     deriving (Show, Eq)
 
@@ -35,6 +37,8 @@ parseCommand args =
     case args of
         ["--service"] -> Service
         ["-s"] -> Service
+        ["--version"] -> Version
+        ["--test-example", requestFilePath, responseFilePath] -> TestExample requestFilePath responseFilePath
         ["--dumbplay", gameCount, rulesetName] -> parseDumbPlay gameCount rulesetName
         ["-d", gameCount, rulesetName] -> parseDumbPlay gameCount rulesetName
         ["--example", rulesetName] -> parseExample [rulesetName]
@@ -127,6 +131,8 @@ renderUsage = unlines
     , "  turn-engine --example CursedTreasure request <n>"
     , "  turn-engine --example CursedTreasure response <n>"
     , "  turn-engine --example CursedTreasure line <n>"
+    , "  turn-engine --test-example <request-file> <response-file>"
+    , "  turn-engine --version"
     , "  turn-engine --service"
     , "  turn-engine -s"
     ]

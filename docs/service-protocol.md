@@ -1,5 +1,35 @@
 # Service Protocol
 
+## Running the Executable
+
+Assume the built executable is named `turn-engine` and lives in a sibling directory next to `docs`, for example `../turn-engine/turn-engine.exe` when invoked from inside `docs` on Windows.
+
+From the repository root, you can run the executable directly:
+
+```powershell
+.\turn-engine\turn-engine.exe --service
+```
+
+From inside the `docs` directory, run the same executable via a relative path:
+
+```powershell
+..\turn-engine\turn-engine.exe --service
+```
+
+`--service` starts the line-delimited JSON protocol over standard input and standard output. Send one JSON request object per line on `stdin`, and read one JSON response object per line from `stdout`.
+
+The executable also exposes non-service helper modes that are useful while developing the protocol:
+
+- `..\turn-engine\turn-engine.exe --version`: print the executable version and exit.
+- `..\turn-engine\turn-engine.exe --test-example <request-file> <response-file>`: deserialize the request example, run it through the engine, and fail if the expected response file does not deserialize or does not match the engine output.
+- `..\turn-engine\turn-engine.exe --example CursedTreasure`: print the full built-in example transcript.
+- `..\turn-engine\turn-engine.exe --example CursedTreasure summary`: print the summary text for the example state.
+- `..\turn-engine\turn-engine.exe --example CursedTreasure request 3`: print a specific example request line.
+- `..\turn-engine\turn-engine.exe --example CursedTreasure response 3`: print the matching example response line.
+- `..\turn-engine\turn-engine.exe --dumbplay 100 CursedTreasure`: run repeated AI-only games and print aggregate stats.
+
+If the executable is not on your `PATH`, always invoke it by relative or absolute path as shown above.
+
 ## Generic Service Protocol
 
 The service transport is line-delimited JSON over standard I/O.

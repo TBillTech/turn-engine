@@ -79,12 +79,12 @@ assertExampleRoundTrip exampleJson assertDecoded = do
         Right value -> pure value
         Left err -> expectationFailure err >> error "unreachable"
     assertDecoded decodedValue
-    StrictByteString.toStrict (encode decodedValue) `shouldBe` canonicalizeJson exampleJson
+    canonicalizeToValue (StrictByteString.toStrict (encode decodedValue)) `shouldBe` canonicalizeToValue exampleJson
 
-canonicalizeJson :: StrictByteString.ByteString -> StrictByteString.ByteString
-canonicalizeJson exampleJson =
+canonicalizeToValue :: StrictByteString.ByteString -> Value
+canonicalizeToValue exampleJson =
     case decodeStrict' exampleJson :: Maybe Value of
-        Just value -> StrictByteString.toStrict (encode value)
+        Just value -> value
         Nothing -> error "example JSON must be valid"
 
 sampleCreateNewGameRequest :: ServiceRequest
