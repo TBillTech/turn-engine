@@ -1,7 +1,7 @@
 module App.ProtocolSpec where
 
 import Data.Aeson (FromJSON, ToJSON, Value, decodeStrict', eitherDecodeStrict', encode)
-import qualified Data.ByteString.Char8 as StrictByteString
+import qualified Data.ByteString as StrictByteString
 import qualified Game.Core.API as Core
 import qualified Game.Core.Types as Core
 import qualified Game.RealEstate.Types as RealEstate
@@ -16,7 +16,7 @@ spec = do
             assertExampleRoundTrip getGameSetupPlayersRequestJson $ \request ->
                 request `shouldBe` GetGameSetupPlayers
 
-        it "round-trips createNewGame" $
+        it "round-trips createNewGame with UTF-8 player names" $
             assertExampleRoundTrip createNewGameRequestJson $ \request ->
                 request `shouldBe` sampleCreateNewGameRequest
 
@@ -41,7 +41,7 @@ spec = do
             assertExampleRoundTrip gameSetupPlayersResponseJson $ \response ->
                 response `shouldBe` GameSetupPlayers Core.getGameSetupPlayers
 
-        it "round-trips newGameCreated success" $
+        it "round-trips newGameCreated success with UTF-8 player names" $
             assertExampleRoundTrip newGameCreatedSuccessJson $ \response ->
                 response `shouldBe` NewGameCreated (Right (sampleGameState, samplePlayerViews))
 
@@ -92,8 +92,8 @@ sampleCreateNewGameRequest = CreateNewGame samplePlayers 12345
 
 samplePlayers :: [Core.PlayerDescription]
 samplePlayers =
-    [ Core.RealEstatePlayerDescription (RealEstate.PlayerDescription "Planner 1")
-    , Core.RealEstatePlayerDescription (RealEstate.PlayerDescription "Planner 2")
+    [ Core.RealEstatePlayerDescription (RealEstate.PlayerDescription "Jose Álvarez")
+    , Core.RealEstatePlayerDescription (RealEstate.PlayerDescription "Miyu 星")
     ]
 
 sampleGameState :: Core.GameState
@@ -101,8 +101,8 @@ sampleGameState =
     Core.RealEstateGame
         (RealEstate.GameState
             { players =
-                [ RealEstate.PlayerDescription "Planner 1"
-                , RealEstate.PlayerDescription "Planner 2"
+                [ RealEstate.PlayerDescription "Jose Álvarez"
+                , RealEstate.PlayerDescription "Miyu 星"
                 ]
             , turn = 0
             , gameOver = True
@@ -119,8 +119,8 @@ sampleCensoredState =
     RealEstate.CensoredGameState
         (RealEstate.GameState
             { players =
-                [ RealEstate.PlayerDescription "Planner 1"
-                , RealEstate.PlayerDescription "Planner 2"
+                [ RealEstate.PlayerDescription "Jose Álvarez"
+                , RealEstate.PlayerDescription "Miyu 星"
                 ]
             , turn = 0
             , gameOver = True
@@ -130,43 +130,46 @@ samplePlayerMove :: Core.PlayerMove
 samplePlayerMove = Core.RealEstatePlayerMove RealEstate.NoOpMove
 
 getGameSetupPlayersRequestJson :: StrictByteString.ByteString
-getGameSetupPlayersRequestJson = "{\"request\":\"getGameSetupPlayers\"}"
+getGameSetupPlayersRequestJson = utf8Json "{\"request\":\"getGameSetupPlayers\"}"
 
 createNewGameRequestJson :: StrictByteString.ByteString
-createNewGameRequestJson = "{\"request\":\"createNewGame\",\"players\":[{\"tag\":\"RealEstatePlayerDescription\",\"contents\":{\"playerName\":\"Planner 1\"}},{\"tag\":\"RealEstatePlayerDescription\",\"contents\":{\"playerName\":\"Planner 2\"}}],\"randomSeed\":12345}"
+createNewGameRequestJson = utf8Json "{\"request\":\"createNewGame\",\"players\":[{\"tag\":\"RealEstatePlayerDescription\",\"contents\":{\"playerName\":\"Jose Álvarez\"}},{\"tag\":\"RealEstatePlayerDescription\",\"contents\":{\"playerName\":\"Miyu 星\"}}],\"randomSeed\":12345}"
 
 enumerateOptionsRequestJson :: StrictByteString.ByteString
-enumerateOptionsRequestJson = "{\"request\":\"enumerateActivePlayerOptions\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}}}"
+enumerateOptionsRequestJson = utf8Json "{\"request\":\"enumerateActivePlayerOptions\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}}}"
 
 makeMoveRequestJson :: StrictByteString.ByteString
-makeMoveRequestJson = "{\"request\":\"makeMove\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}},\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}"
+makeMoveRequestJson = utf8Json "{\"request\":\"makeMove\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}},\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}"
 
 heuristicHintRequestJson :: StrictByteString.ByteString
-heuristicHintRequestJson = "{\"request\":\"heuristicHint\",\"level\":2,\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}},\"playerMoves\":[{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}]}"
+heuristicHintRequestJson = utf8Json "{\"request\":\"heuristicHint\",\"level\":2,\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}},\"playerMoves\":[{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}]}"
 
 summaryRequestJson :: StrictByteString.ByteString
-summaryRequestJson = "{\"request\":\"summary\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}}}"
+summaryRequestJson = utf8Json "{\"request\":\"summary\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}}}"
 
 gameSetupPlayersResponseJson :: StrictByteString.ByteString
-gameSetupPlayersResponseJson = "{\"response\":\"gameSetupPlayers\",\"rulesets\":[{\"name\":\"Cursed Treasure\",\"playerTemplates\":[{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":1,\"playerName\":\"Player PlayerId 1\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":2,\"playerName\":\"Player PlayerId 2\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":3,\"playerName\":\"Player PlayerId 3\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Blue\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":4,\"playerName\":\"Player PlayerId 4\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Purple\"}}]},{\"name\":\"Fog Of Battle\",\"playerTemplates\":[]},{\"name\":\"Art Of War\",\"playerTemplates\":[]},{\"name\":\"Real Estate\",\"playerTemplates\":[]}]}"
+gameSetupPlayersResponseJson = utf8Json "{\"response\":\"gameSetupPlayers\",\"rulesets\":[{\"name\":\"Cursed Treasure\",\"playerTemplates\":[{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":1,\"playerName\":\"Player PlayerId 1\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":2,\"playerName\":\"Player PlayerId 2\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":3,\"playerName\":\"Player PlayerId 3\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Blue\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":4,\"playerName\":\"Player PlayerId 4\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Purple\"}}]},{\"name\":\"Fog Of Battle\",\"playerTemplates\":[]},{\"name\":\"Art Of War\",\"playerTemplates\":[]},{\"name\":\"Real Estate\",\"playerTemplates\":[]}]}"
 
 newGameCreatedSuccessJson :: StrictByteString.ByteString
-newGameCreatedSuccessJson = "{\"response\":\"newGameCreated\",\"status\":\"ok\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}}]}"
+newGameCreatedSuccessJson = utf8Json "{\"response\":\"newGameCreated\",\"status\":\"ok\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}}]}"
 
 newGameCreatedErrorJson :: StrictByteString.ByteString
-newGameCreatedErrorJson = "{\"response\":\"newGameCreated\",\"status\":\"error\",\"message\":\"PlayerDescription list must be non-empty and all match the same ruleset.\"}"
+newGameCreatedErrorJson = utf8Json "{\"response\":\"newGameCreated\",\"status\":\"error\",\"message\":\"PlayerDescription list must be non-empty and all match the same ruleset.\"}"
 
 activePlayerOptionsResponseJson :: StrictByteString.ByteString
-activePlayerOptionsResponseJson = "{\"response\":\"activePlayerOptions\",\"playerMoves\":[]}"
+activePlayerOptionsResponseJson = utf8Json "{\"response\":\"activePlayerOptions\",\"playerMoves\":[]}"
 
 moveAppliedResponseJson :: StrictByteString.ByteString
-moveAppliedResponseJson = "{\"response\":\"moveApplied\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Planner 1\"},{\"playerName\":\"Planner 2\"}],\"turn\":0,\"gameOver\":true}}]}"
+moveAppliedResponseJson = utf8Json "{\"response\":\"moveApplied\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"gameOver\":true}}]}"
 
 hintGeneratedResponseJson :: StrictByteString.ByteString
-hintGeneratedResponseJson = "{\"response\":\"hintGenerated\",\"hints\":[{\"score\":0,\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}]}"
+hintGeneratedResponseJson = utf8Json "{\"response\":\"hintGenerated\",\"hints\":[{\"score\":0,\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}]}"
 
 summaryGeneratedResponseJson :: StrictByteString.ByteString
-summaryGeneratedResponseJson = "{\"response\":\"summaryGenerated\",\"summary\":\"undefined\"}"
+summaryGeneratedResponseJson = utf8Json "{\"response\":\"summaryGenerated\",\"summary\":\"undefined\"}"
 
 serviceErrorResponseJson :: StrictByteString.ByteString
-serviceErrorResponseJson = "{\"response\":\"serviceError\",\"message\":\"Invalid request JSON.\"}"
+serviceErrorResponseJson = utf8Json "{\"response\":\"serviceError\",\"message\":\"Invalid request JSON.\"}"
+
+utf8Json :: Text -> StrictByteString.ByteString
+utf8Json = encodeUtf8

@@ -19,7 +19,8 @@ extra-doc-files:    README.md
 common common-options
     build-depends:
         base,
-        relude
+        relude,
+        text
     mixins:
         base hiding (Prelude),
         relude (Relude as Prelude),

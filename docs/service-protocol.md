@@ -18,6 +18,10 @@ From inside the `docs` directory, run the same executable via a relative path:
 
 `--service` starts the line-delimited JSON protocol over standard input and standard output. Send one JSON request object per line on `stdin`, and read one JSON response object per line from `stdout`.
 
+All request and response text is UTF-8 JSON. Clients should write UTF-8 bytes to `stdin` and decode UTF-8 bytes from `stdout`. Do not prefix lines with a UTF-8 BOM.
+
+On Windows, be careful with older PowerShell hosts: they may still pipe text using a legacy code page unless the caller explicitly switches its console encodings to UTF-8 or writes raw UTF-8 bytes.
+
 The executable also exposes non-service helper modes that are useful while developing the protocol:
 
 - `..\turn-engine\turn-engine.exe --version`: print the executable version and exit.
@@ -36,6 +40,7 @@ The service transport is line-delimited JSON over standard I/O.
 
 - Unity writes exactly one JSON request object per line to `stdin`.
 - The Haskell service writes exactly one JSON response object per line to `stdout`.
+- All strings in both directions are encoded as UTF-8 JSON.
 - Invalid JSON is returned as a `serviceError` response.
 
 The top-level service envelope is explicit and regular:
@@ -134,11 +139,13 @@ This is the generic failure response when the service cannot parse or accept a r
 
 The files in [docs/jsonexamples/CursedTreasure](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure) are concrete request and response examples generated from the transcript-backed example API.
 
+The transcript-backed examples intentionally use non-ASCII UTF-8 player names so clients can verify that `playerName` survives end-to-end protocol handling.
+
 ### Setup and Game Creation
 
 - [docs/jsonexamples/CursedTreasure/get-game-setup-players.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/get-game-setup-players.request.json): Minimal `getGameSetupPlayers` request.
 - [docs/jsonexamples/CursedTreasure/get-game-setup-players.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/get-game-setup-players.response.json): Available rulesets and default player templates, including the full CursedTreasure color roster.
-- [docs/jsonexamples/CursedTreasure/create-new-game.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/create-new-game.request.json): `createNewGame` request with a restricted player list and explicit random seed.
+- [docs/jsonexamples/CursedTreasure/create-new-game.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/create-new-game.request.json): `createNewGame` request with a restricted player list, explicit random seed, and UTF-8 `playerName` values.
 - [docs/jsonexamples/CursedTreasure/create-new-game.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/create-new-game.response.json): Successful game creation, including the authoritative initial `gameState` and per-player censored `playerViews`.
 
 ### Early Turn Enumeration

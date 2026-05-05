@@ -652,7 +652,7 @@ createNewGameState playerDs randomSeed
                 , terrainBoard = board
                 , treasureBoards = newTreasureBoard <$> take 4 allClueColors
                 , raisingTreasure = Nothing
-                , latestMessage = "Player " <> show firstPlayerName <> " Turn"
+                , latestMessage = "Player \"" <> firstPlayerName <> "\" Turn"
                 , gameOver = False
                 , seed = (randomSeed, 1)
                 }

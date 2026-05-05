@@ -42,8 +42,19 @@ data ExampleExchange = ExampleExchange
 buildInitialRequest :: RulesetName -> Either Text ServiceRequest
 buildInitialRequest CursedTreasure =
     let selectedPlayerCount = 3
-        setupPlayers = take selectedPlayerCount CursedTreasure.getGameSetupPlayers
+        setupPlayers = zipWith renamePlayer cursedTreasureExampleNames (take selectedPlayerCount CursedTreasure.getGameSetupPlayers)
      in Right (CreateNewGame (map Core.CursedTreasurePlayerDescription setupPlayers) 12345)
+
+cursedTreasureExampleNames :: [Text]
+cursedTreasureExampleNames =
+    [ "Jose Álvarez"
+    , "Miyu 星"
+    , "Zoe Faßbinder"
+    ]
+
+renamePlayer :: Text -> CursedTreasure.PlayerDescription -> CursedTreasure.PlayerDescription
+renamePlayer playerName player =
+    player{CursedTreasure.playerName = playerName}
 
 playGame :: Core.GameState -> StdGen -> [ExampleExchange]
 playGame gameState rng
@@ -74,7 +85,7 @@ playGame gameState rng
             _ -> [optionExchange]
 
 putEncoded :: ToJSON a => a -> IO ()
-putEncoded = LazyByteString.putStrLn . encode
+putEncoded = putLBSLn . encode
 
 renderExampleOutput :: ExampleMode -> [ExampleExchange] -> IO ()
 renderExampleOutput exampleMode exchanges =
