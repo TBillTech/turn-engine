@@ -13,3 +13,7 @@ spec = do
         it "parses --test-example with request and response files" $ do
             parseCommand ["--test-example", "docs/request.json", "docs/response.json"]
                 `shouldBe` TestExample "docs/request.json" "docs/response.json"
+
+        it "parses --move_example_request with a ruleset and move constructor" $ do
+            parseCommand ["--move_example_request", "CursedTreasure", "RaisingTreasureWardCurse"]
+                `shouldBe` MoveExampleRequest CursedTreasure "RaisingTreasureWardCurse"

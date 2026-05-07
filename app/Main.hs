@@ -6,7 +6,7 @@ import System.IO (hSetEncoding)
 
 import App.CLI (Command (..), parseCommand)
 import App.DumbPlay (renderDumbPlayStats, runDumbPlay)
-import App.Example (runExample)
+import App.Example (runExample, runMoveExampleRequest)
 import App.Service (runService)
 import App.TestExample (runTestExample)
 import qualified Paths_turn_engine
@@ -21,6 +21,7 @@ main = do
         DumbPlay gameCount rulesetName ->
             runDumbPlay gameCount rulesetName >>= putTextLn . renderDumbPlayStats
         Example rulesetName exampleMode -> runExample rulesetName exampleMode
+        MoveExampleRequest rulesetName moveName -> runMoveExampleRequest rulesetName moveName
         Service -> runService
         Version -> putTextLn (toText (showVersion Paths_turn_engine.version))
         TestExample requestFilePath responseFilePath -> do

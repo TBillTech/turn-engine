@@ -80,6 +80,7 @@ test-suite turn-engine-test
     main-is:          Spec.hs
     other-modules:    Game.Core.APISpec
                     , App.CLISpec
+                    , App.ExampleSpec
                     , App.ProtocolSpec
                     , App.TestExampleSpec
                     , Game.Core.PrimitivesSpec

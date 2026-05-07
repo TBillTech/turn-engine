@@ -16,6 +16,7 @@ data RulesetName
 data Command
     = DumbPlay Int RulesetName
     | Example RulesetName ExampleMode
+    | MoveExampleRequest RulesetName Text
     | Service
     | Version
     | TestExample FilePath FilePath
@@ -41,12 +42,19 @@ parseCommand args =
         ["--test-example", requestFilePath, responseFilePath] -> TestExample requestFilePath responseFilePath
         ["--dumbplay", gameCount, rulesetName] -> parseDumbPlay gameCount rulesetName
         ["-d", gameCount, rulesetName] -> parseDumbPlay gameCount rulesetName
+        ["--move_example_request", rulesetName, moveName] -> parseMoveExampleRequest rulesetName moveName
         ["--example", rulesetName] -> parseExample [rulesetName]
         ["-e", rulesetName] -> parseExample [rulesetName]
         "--example" : exampleArgs -> parseExample exampleArgs
         "-e" : exampleArgs -> parseExample exampleArgs
         [] -> Help renderUsage
         _ -> Help $ "Unrecognized arguments.\n\n" <> renderUsage
+
+parseMoveExampleRequest :: String -> String -> Command
+parseMoveExampleRequest rulesetText moveName =
+    case parseRulesetName rulesetText of
+        Nothing -> Help $ "Unsupported ruleset for move example mode: " <> toText rulesetText <> "\n\n" <> renderUsage
+        Just rulesetName -> MoveExampleRequest rulesetName (toText moveName)
 
 parseDumbPlay :: String -> String -> Command
 parseDumbPlay gameCountText rulesetText =
@@ -131,6 +139,7 @@ renderUsage = unlines
     , "  turn-engine --example CursedTreasure request <n>"
     , "  turn-engine --example CursedTreasure response <n>"
     , "  turn-engine --example CursedTreasure line <n>"
+    , "  turn-engine --move_example_request CursedTreasure <PlayerMove>"
     , "  turn-engine --test-example <request-file> <response-file>"
     , "  turn-engine --version"
     , "  turn-engine --service"

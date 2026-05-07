@@ -26,6 +26,7 @@ The executable also exposes non-service helper modes that are useful while devel
 
 - `..\turn-engine\turn-engine.exe --version`: print the executable version and exit.
 - `..\turn-engine\turn-engine.exe --test-example <request-file> <response-file>`: deserialize the request example, run it through the engine, and fail if the expected response file does not deserialize or does not match the engine output.
+- `..\turn-engine\turn-engine.exe --move_example_request CursedTreasure <PlayerMove>`: print a `makeMove` request whose `playerMove` uses the requested constructor and whose `gameState` is curated so that constructor is legal.
 - `..\turn-engine\turn-engine.exe --example CursedTreasure`: print the full built-in example transcript.
 - `..\turn-engine\turn-engine.exe --example CursedTreasure summary`: print the summary text for the example state.
 - `..\turn-engine\turn-engine.exe --example CursedTreasure request 3`: print a specific example request line.
@@ -173,14 +174,14 @@ The transcript-backed examples intentionally use non-ASCII UTF-8 player names so
 
 ### Curse Handling
 
-- [docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.request.json): Enumeration request immediately before the curse-handling decision point.
-- [docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.response.json): Legal move list including `RaisingTreasureAcceptCurse`.
+- [docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.request.json): Enumeration request immediately before the curse-handling decision point used by the accept-curse example.
+- [docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-accept-curse.response.json): Legal move list showing both `RaisingTreasureAcceptCurse` and `RaisingTreasureWardCurse` when the active player still has an amulet.
 - [docs/jsonexamples/CursedTreasure/make-move-accept-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-accept-curse.request.json): `makeMove` request for the actual `RaisingTreasureAcceptCurse` move tag used by the engine.
 - [docs/jsonexamples/CursedTreasure/make-move-accept-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-accept-curse.response.json): Resulting state after the curse is accepted.
-- [docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.request.json): Alias copy using the requested “ward curse” wording for the same decision point.
-- [docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.response.json): Alias copy of the same response example.
-- [docs/jsonexamples/CursedTreasure/make-move-ward-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-ward-curse.request.json): Alias copy of the accept-curse request, named with the requested terminology.
-- [docs/jsonexamples/CursedTreasure/make-move-ward-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-ward-curse.response.json): Alias copy of the accept-curse response.
+- [docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.request.json): Enumeration request immediately before the curse-handling decision point used by the ward-curse example.
+- [docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-ward-curse.response.json): Legal move list showing both `RaisingTreasureAcceptCurse` and `RaisingTreasureWardCurse` for the ward-curse example state.
+- [docs/jsonexamples/CursedTreasure/make-move-ward-curse.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-ward-curse.request.json): `makeMove` request for the distinct `RaisingTreasureWardCurse` move tag.
+- [docs/jsonexamples/CursedTreasure/make-move-ward-curse.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-ward-curse.response.json): Resulting state after the curse is warded by spending an amulet.
 
 ### Taking Treasure
 
@@ -188,3 +189,26 @@ The transcript-backed examples intentionally use non-ASCII UTF-8 player names so
 - [docs/jsonexamples/CursedTreasure/enumerate-before-take-treasure.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/enumerate-before-take-treasure.response.json): Legal move list showing treasure-taking among the available raise-treasure actions.
 - [docs/jsonexamples/CursedTreasure/make-move-take-treasure.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-take-treasure.request.json): `makeMove` request for `RaisingTreasureTake`.
 - [docs/jsonexamples/CursedTreasure/make-move-take-treasure.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-take-treasure.response.json): Resulting state after a treasure is taken.
+
+### Exhaustive Move Examples
+
+The move-example helper now provides a maintained request/response pair for every `Game.CursedTreasure.Types.PlayerMove` constructor.
+
+- [docs/jsonexamples/CursedTreasure/make-move-error.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-error.request.json): `makeMove` request carrying `PlayerMoveError` for protocol and adapter testing.
+- [docs/jsonexamples/CursedTreasure/make-move-error.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-error.response.json): Result after the engine receives `PlayerMoveError`.
+- [docs/jsonexamples/CursedTreasure/make-move-pass-turn.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-pass-turn.request.json): `makeMove` request for `PassTurn`.
+- [docs/jsonexamples/CursedTreasure/make-move-pass-turn.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-pass-turn.response.json): Result after a nominal pass.
+- [docs/jsonexamples/CursedTreasure/make-move-exchange-clue-cards.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-exchange-clue-cards.request.json): `makeMove` request for `ExchangeClueCards`.
+- [docs/jsonexamples/CursedTreasure/make-move-exchange-clue-cards.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-exchange-clue-cards.response.json): Result after a clue-card exchange.
+- [docs/jsonexamples/CursedTreasure/make-move-pickup-amulet.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-pickup-amulet.request.json): `makeMove` request for `PickupAmulet`.
+- [docs/jsonexamples/CursedTreasure/make-move-pickup-amulet.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-pickup-amulet.response.json): Result after picking up an amulet.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-increase-move.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-increase-move.request.json): `makeMove` request for `UseAmuletIncrMove`.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-increase-move.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-increase-move.response.json): Result after spending an amulet for extra jeep movement.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-clue-play.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-clue-play.request.json): `makeMove` request for `UseAmuletPlayClue`.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-clue-play.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-clue-play.response.json): Result after spending an amulet to play a clue.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-exchange-cards.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-exchange-cards.request.json): `makeMove` request for `UseAmuletExchangeCards`.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-exchange-cards.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-exchange-cards.response.json): Result after spending an amulet to exchange clue cards.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-remove-site-marker.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-remove-site-marker.request.json): `makeMove` request for `UseAmuletRemoveSiteMarker`.
+- [docs/jsonexamples/CursedTreasure/make-move-use-amulet-remove-site-marker.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-use-amulet-remove-site-marker.response.json): Result after spending an amulet to remove a clue marker.
+- [docs/jsonexamples/CursedTreasure/make-move-pass-treasure.request.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-pass-treasure.request.json): `makeMove` request for `RaisingTreasurePass`.
+- [docs/jsonexamples/CursedTreasure/make-move-pass-treasure.response.json](d:/code/haskell/turn-engine/docs/jsonexamples/CursedTreasure/make-move-pass-treasure.response.json): Result after passing during treasure resolution.

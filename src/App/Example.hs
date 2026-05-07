@@ -1,10 +1,12 @@
 module App.Example
     ( runExample
+    , runMoveExampleRequest
+    , buildMoveExampleRequest
     )
 where
 
 import Data.Aeson (ToJSON (toEncoding, toJSON), encode, object, pairs, (.=))
-import qualified Data.ByteString.Lazy.Char8 as LazyByteString
+import qualified Data.Map.Strict as Map
 import System.Random (StdGen, mkStdGen, uniformR)
 
 import App.CLI (ExampleMode (..), RulesetName (..))
@@ -13,6 +15,7 @@ import App.Service (handleRequest)
 import qualified Game.Core.API as CoreAPI
 import qualified Game.ArtOfWar.Types as ArtOfWar
 import qualified Game.Core.Types as Core
+import Game.Core.Primitives (CubeCoordinateTokens (CubeCoordinateTokens), CubeCoordinate, ToHourHand (toHourHand), mkCubeCoordinate)
 import qualified Game.CursedTreasure.API as CursedTreasure
 import qualified Game.CursedTreasure.Types as CursedTreasure
 import qualified Game.FogOfBattle.Types as FogOfBattle
@@ -33,6 +36,193 @@ runExample rulesetName exampleMode =
                     renderExampleOutput exampleMode (firstExchange : secondExchange : remainingExchanges)
                 NewGameCreated (Left err) -> putTextLn err
                 _ -> putTextLn "Unexpected response while creating example game."
+
+runMoveExampleRequest :: RulesetName -> Text -> IO ()
+runMoveExampleRequest rulesetName moveName =
+    case buildMoveExampleRequest rulesetName moveName of
+        Left err -> putTextLn err
+        Right request -> putEncoded request
+
+buildMoveExampleRequest :: RulesetName -> Text -> Either Text ServiceRequest
+buildMoveExampleRequest CursedTreasure moveName = do
+    move <- buildCursedTreasureMoveExample moveName
+    pure $ MakeMove (Core.CursedTreasureGame move.gameState) (Core.CursedTreasurePlayerMove move.playerMove)
+
+data CursedTreasureMoveExample = CursedTreasureMoveExample
+    { gameState :: CursedTreasure.GameState
+    , playerMove :: CursedTreasure.PlayerMove
+    }
+
+buildCursedTreasureMoveExample :: Text -> Either Text CursedTreasureMoveExample
+buildCursedTreasureMoveExample moveName
+    | moveName == "PlayerMoveError" =
+        Right (CursedTreasureMoveExample nominalGameState (CursedTreasure.PlayerMoveError "example move error"))
+    | moveName `elem` raisingTreasureMoveNames =
+        buildEnumeratedMoveExample moveName (if moveName `elem` ["RaisingTreasurePass", "RaisingTreasureTake"] then raisingTreasureGameState else raisingTreasureCurseGameState)
+    | otherwise =
+        buildEnumeratedMoveExample moveName (adjustNominalGameState moveName nominalGameState)
+
+buildEnumeratedMoveExample :: Text -> CursedTreasure.GameState -> Either Text CursedTreasureMoveExample
+buildEnumeratedMoveExample moveName gameState =
+    case find (matchesMoveConstructor moveName) (CursedTreasure.enumerateActivePlayerOptions gameState) of
+        Just move -> Right (CursedTreasureMoveExample gameState move)
+        Nothing -> Left ("No legal CursedTreasure move example found for constructor " <> moveName <> ".")
+
+matchesMoveConstructor :: Text -> CursedTreasure.PlayerMove -> Bool
+matchesMoveConstructor moveName playerMove =
+    case moveName of
+        "PlayerMoveError" -> case playerMove of CursedTreasure.PlayerMoveError _ -> True; _ -> False
+        "PassTurn" -> playerMove == CursedTreasure.PassTurn
+        "PlayClue" -> case playerMove of CursedTreasure.PlayClue _ _ -> True; _ -> False
+        "MoveJeep" -> case playerMove of CursedTreasure.MoveJeep _ _ -> True; _ -> False
+        "ExchangeClueCards" -> playerMove == CursedTreasure.ExchangeClueCards
+        "PickupAmulet" -> playerMove == CursedTreasure.PickupAmulet
+        "UseAmuletIncrMove" -> playerMove == CursedTreasure.UseAmuletIncrMove
+        "UseAmuletPlayClue" -> case playerMove of CursedTreasure.UseAmuletPlayClue _ _ -> True; _ -> False
+        "UseAmuletExchangeCards" -> playerMove == CursedTreasure.UseAmuletExchangeCards
+        "UseAmuletRemoveSiteMarker" -> case playerMove of CursedTreasure.UseAmuletRemoveSiteMarker _ _ _ -> True; _ -> False
+        "RaiseTreasure" -> case playerMove of CursedTreasure.RaiseTreasure _ -> True; _ -> False
+        "RaisingTreasurePass" -> playerMove == CursedTreasure.RaisingTreasurePass
+        "RaisingTreasureTake" -> playerMove == CursedTreasure.RaisingTreasureTake
+        "RaisingTreasureWardCurse" -> playerMove == CursedTreasure.RaisingTreasureWardCurse
+        "RaisingTreasureAcceptCurse" -> playerMove == CursedTreasure.RaisingTreasureAcceptCurse
+        _ -> False
+
+raisingTreasureMoveNames :: [Text]
+raisingTreasureMoveNames =
+    [ "RaisingTreasurePass"
+    , "RaisingTreasureTake"
+    , "RaisingTreasureWardCurse"
+    , "RaisingTreasureAcceptCurse"
+    ]
+
+nominalGameState :: CursedTreasure.GameState
+nominalGameState =
+    baseCursedTreasureGameState
+        { CursedTreasure.players = [activePlayerState, secondPlayerState]
+        , CursedTreasure.terrainBoard = boardFromList nominalBoardHexes
+        , CursedTreasure.activePlayer = activePlayerId
+        , CursedTreasure.playerTurn = activePlayerId
+        }
+  where
+    activePlayerState =
+        baseActivePlayerState
+            { CursedTreasure.amulets = 1
+            , CursedTreasure.clues = [jungleClue]
+            , CursedTreasure.availableJeepMoves = 1
+            , CursedTreasure.availableCluePlays = 1
+            , CursedTreasure.availablePickupAmulet = 1
+            , CursedTreasure.availableClueCardExchange = 1
+            }
+    secondPlayerState = baseSecondPlayerState
+    nominalBoardHexes =
+        [ (origin, CursedTreasure.TerrainHex False CursedTreasure.Meadow [CursedTreasure.PlayerJeep activePlayerId, CursedTreasure.Amulet, CursedTreasure.ClueToken firstClueColor])
+        , (adjacentOrigin, CursedTreasure.TerrainHex False CursedTreasure.Jungle [CursedTreasure.ClueToken firstClueColor])
+        , (beachOrigin, CursedTreasure.TerrainHex False CursedTreasure.Beach [])
+        , (oceanOrigin, CursedTreasure.TerrainHex True CursedTreasure.Ocean [])
+        ]
+
+raisingTreasureGameState :: CursedTreasure.GameState
+raisingTreasureGameState =
+    nominalGameState
+        { CursedTreasure.players = [activePlayerState, secondPlayerState]
+        , CursedTreasure.raisingTreasure = Just treasureState
+        }
+  where
+    treasureState =
+        CursedTreasure.RaisingTreasureState
+            { CursedTreasure.rtTreasureChest = ([CursedTreasure.Treasure 4], [])
+            , CursedTreasure.rtOrder = [activePlayerId]
+            , CursedTreasure.rtPlayerIndex = 0
+            , CursedTreasure.rtViewing = []
+            }
+    activePlayerState = baseActivePlayerState
+    secondPlayerState = baseSecondPlayerState
+
+raisingTreasureCurseGameState :: CursedTreasure.GameState
+raisingTreasureCurseGameState =
+    nominalGameState
+        { CursedTreasure.players = [activePlayerState, secondPlayerState]
+        , CursedTreasure.raisingTreasure = Just treasureState
+        }
+  where
+    treasureState =
+        CursedTreasure.RaisingTreasureState
+            { CursedTreasure.rtTreasureChest = ([CursedTreasure.Curse, CursedTreasure.Treasure 4], [])
+            , CursedTreasure.rtOrder = [activePlayerId]
+            , CursedTreasure.rtPlayerIndex = 0
+            , CursedTreasure.rtViewing = []
+            }
+    activePlayerState = baseActivePlayerState { CursedTreasure.amulets = 1, CursedTreasure.foundTreasures = [CursedTreasure.Treasure 8, CursedTreasure.Treasure 5] }
+    secondPlayerState = baseSecondPlayerState
+
+adjustNominalGameState :: Text -> CursedTreasure.GameState -> CursedTreasure.GameState
+adjustNominalGameState moveName gameState =
+    gameState
+        { CursedTreasure.players = map adjustPlayer gameState.players
+        , CursedTreasure.terrainBoard = adjustBoard moveName gameState.terrainBoard
+        }
+  where
+    adjustPlayer playerState
+        | playerState.player.playerId /= activePlayerId = playerState
+        | otherwise =
+            case moveName of
+                "UseAmuletIncrMove" -> playerState { CursedTreasure.availableJeepMoves = 0 }
+                "UseAmuletPlayClue" -> playerState { CursedTreasure.availableCluePlays = 0 }
+                "UseAmuletExchangeCards" -> playerState { CursedTreasure.availableClueCardExchange = 0 }
+                "UseAmuletRemoveSiteMarker" -> playerState { CursedTreasure.availableCluePlays = 0, CursedTreasure.availableClueCardExchange = 0 }
+                _ -> playerState
+
+    adjustBoard "RaiseTreasure" _ =
+        boardFromList
+            [ (origin, CursedTreasure.TerrainHex False CursedTreasure.Meadow [CursedTreasure.PlayerJeep activePlayerId, CursedTreasure.Amulet, CursedTreasure.ClueToken firstClueColor])
+            , (adjacentOrigin, CursedTreasure.TerrainHex False CursedTreasure.Jungle [])
+            , (beachOrigin, CursedTreasure.TerrainHex False CursedTreasure.Beach [])
+            , (oceanOrigin, CursedTreasure.TerrainHex True CursedTreasure.Ocean [])
+            ]
+    adjustBoard _ board = board
+
+baseCursedTreasureGameState :: CursedTreasure.GameState
+baseCursedTreasureGameState = fst (CursedTreasure.createNewGame (take 2 CursedTreasure.getGameSetupPlayers) 12345)
+
+baseActivePlayerState :: CursedTreasure.PlayerState
+baseActivePlayerState =
+    case baseCursedTreasureGameState.players of
+        playerState : _ -> playerState
+        [] -> error "Expected at least one CursedTreasure player"
+
+baseSecondPlayerState :: CursedTreasure.PlayerState
+baseSecondPlayerState =
+    case drop 1 baseCursedTreasureGameState.players of
+        playerState : _ -> playerState
+        [] -> error "Expected at least two CursedTreasure players"
+
+activePlayerId :: CursedTreasure.PlayerId
+activePlayerId = baseActivePlayerState.player.playerId
+
+firstClueColor :: CursedTreasure.ClueColor
+firstClueColor =
+    case CursedTreasure.allClueColors of
+        clueColor : _ -> clueColor
+        [] -> error "Expected at least one clue color"
+
+jungleClue :: CursedTreasure.ClueCard
+jungleClue = CursedTreasure.IsOn (CursedTreasure.FeatureClue False CursedTreasure.Jungle)
+
+boardFromList :: [(CubeCoordinate Int, CursedTreasure.TerrainHex)] -> CursedTreasure.HexBoard
+boardFromList = CubeCoordinateTokens (toHourHand (0 :: Int)) . Map.fromList
+
+origin :: CubeCoordinate Int
+origin = mkCubeCoordinate 0 0
+
+adjacentOrigin :: CubeCoordinate Int
+adjacentOrigin = mkCubeCoordinate 1 0
+
+beachOrigin :: CubeCoordinate Int
+beachOrigin = mkCubeCoordinate 0 1
+
+oceanOrigin :: CubeCoordinate Int
+oceanOrigin = mkCubeCoordinate (-1) 0
 
 data ExampleExchange = ExampleExchange
     { request :: ServiceRequest
