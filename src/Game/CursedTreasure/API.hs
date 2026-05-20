@@ -1215,7 +1215,7 @@ raiseTreasureFinished s =
                     rotateToken token = token
             addFinalAmulet coord hourHand board = case reverse (amuletRay coord hourHand board) of
                 finalCoord : _ -> addAmulet finalCoord board
-                [] -> board
+                [] -> addAmulet coord board
             addAmulet rayCoord = alterTokenList addAmuletToken (Just rayCoord)
                 where
                     addAmuletToken tokens

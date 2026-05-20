@@ -1828,33 +1828,29 @@ spec = do
                 gameRaisingTreasure resultState `shouldBe` Nothing
                 gameActivePlayer resultState `shouldBe` gamePlayerTurn resultState
 
-            it "adds one amulet per statue on the last land hex before Ocean and rotates statues 2 hours clockwise when treasure raising finishes" $ do
+            it "creates exactly one amulet per statue, including on the statue hex when Ocean blocks projection, and rotates statues 2 hours clockwise when treasure raising finishes" $ do
                 let playerState = basePlayerState { amulets = 2 }
                     eastStatue = mkCubeCoordinate 0 0
                     eastRay1 = mkCubeCoordinate 1 0
                     eastRay2 = mkCubeCoordinate 2 0
                     eastOcean = mkCubeCoordinate 3 0
-                    southeastStatue = mkCubeCoordinate 0 3
-                    southeastRay1 = mkCubeCoordinate 1 2
-                    southeastRay2 = mkCubeCoordinate 2 1
-                    southeastOcean = mkCubeCoordinate 3 0
                     westStatue = mkCubeCoordinate 0 (-2)
                     westRay1 = mkCubeCoordinate (-1) (-2)
                     westRay2 = mkCubeCoordinate (-2) (-2)
                     westOcean = mkCubeCoordinate (-3) (-2)
+                    oceanFacingStatue = mkCubeCoordinate 2 2
+                    northOcean = mkCubeCoordinate 2 3
                     boardHexes =
                         [ (eastStatue, TerrainHex False Meadow [Statue (toHourHand (3 :: Int))])
                         , (eastRay1, TerrainHex False Meadow [])
                         , (eastRay2, TerrainHex False Meadow [Hut])
                         , (eastOcean, TerrainHex True Ocean [])
-                        , (southeastStatue, TerrainHex False Jungle [Statue (toHourHand (5 :: Int))])
-                        , (southeastRay1, TerrainHex False Jungle [PalmTree])
-                        , (southeastRay2, TerrainHex False Jungle [])
-                        , (southeastOcean, TerrainHex True Ocean [])
                         , (westStatue, TerrainHex False Beach [Statue (toHourHand (9 :: Int))])
                         , (westRay1, TerrainHex False Beach [])
                         , (westRay2, TerrainHex False Beach [ClueToken firstClueColor])
                         , (westOcean, TerrainHex True Ocean [])
+                        , (oceanFacingStatue, TerrainHex False Jungle [Statue (toHourHand (1 :: Int))])
+                        , (northOcean, TerrainHex True Ocean [])
                         ]
                     treasureState =
                         RaisingTreasureState
@@ -1871,17 +1867,16 @@ spec = do
                             }
                     resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
                 boardTokensAt eastStatue resultState `shouldBe` [Statue (toHourHand (5 :: Int))]
-                boardTokensAt southeastStatue resultState `shouldBe` [Statue (toHourHand (7 :: Int))]
                 boardTokensAt westStatue resultState `shouldBe` [Statue (toHourHand (11 :: Int))]
+                boardTokensAt oceanFacingStatue resultState `shouldMatchList` [Amulet, Statue (toHourHand (3 :: Int))]
                 boardTokensAt eastRay1 resultState `shouldNotContain` [Amulet]
                 boardTokensAt eastRay2 resultState `shouldMatchList` [Amulet, Hut]
-                boardTokensAt southeastRay1 resultState `shouldBe` [PalmTree]
-                boardTokensAt southeastRay2 resultState `shouldContain` [Amulet]
                 boardTokensAt westRay1 resultState `shouldNotContain` [Amulet]
                 boardTokensAt westRay2 resultState `shouldMatchList` [Amulet, ClueToken firstClueColor]
                 boardTokensAt eastOcean resultState `shouldNotContain` [Amulet]
-                boardTokensAt southeastOcean resultState `shouldNotContain` [Amulet]
                 boardTokensAt westOcean resultState `shouldNotContain` [Amulet]
+                boardTokensAt northOcean resultState `shouldNotContain` [Amulet]
+                countTokenLike (== Amulet) (terrainBoardMap resultState) `shouldBe` 3
 
             it "removes one highest treasure and advances for RaisingTreasureAcceptCurse" $ do
                 let player2Id = mkExistingPlayerId 2
