@@ -12,6 +12,8 @@ module Game.CursedTreasure.API
     , getConnectedSets
     , isValidTerrainBoard
     , createBoard
+    , GrowthRule (..)
+    , growTerrainSeeds
     , nextTurn
     , passTurnOption
     , pickupAmuletCase
@@ -375,8 +377,11 @@ data GrowthRule = RandomGrowth | RiverGrowth | CoastalGrowth
 growTerrainSeeds :: RandomGen g => (GrowthRule, [Int]) -> TerrainHex -> (HexMap, g) -> (HexMap, g)
 growTerrainSeeds (rule, sizes) tHex mg = grownG
     where   (seeds, withSeedsG) = addTerrainSeeds (length sizes) tHex mg
-            seedSets = zipWith (\size seed -> (size, seed, one seed)) sizes seeds
-            grownG = foldr (growTerrainSeed seedSets rule tHex) withSeedsG seedSets
+            initialSize size = case rule of
+                RiverGrowth -> max 0 (size - 1)
+                _ -> size
+            seedSets = zipWith (\size seed -> (initialSize size, seed, one seed)) sizes seeds
+            grownG = foldl' (flip (growTerrainSeed seedSets rule tHex)) withSeedsG seedSets
 
 -- | Expands one seeded cluster according to the requested growth rule. 
 -- | Growing no seeds returns a likewise empty map.
@@ -490,10 +495,13 @@ validGrowthCandidates tHex territory mapG =
 repairSeed :: RandomGen g => [(Int, CubeCoordinate Int, HexSet)] -> TerrainHex -> CubeCoordinate Int -> HexSet -> (HexMap, g) -> (CubeCoordinate Int, HexSet, (HexMap, g))
 repairSeed _ tHex originalSeed territory mapG
     | Set.size territory /= 1 = (originalSeed, territory, mapG)
-    | not (sameFeatureOutsideTerritory tHex territory (fst mapG) originalSeed) = (originalSeed, territory, mapG)
+    | not needsRepair = (originalSeed, territory, mapG)
     | otherwise = maybe (originalSeed, territory, mapG) moveSeed repairedSeed
     where
         board = fst mapG
+        needsRepair =
+            sameFeatureOutsideTerritory tHex territory board originalSeed
+                || null (validGrowthCandidates tHex territory mapG)
         boardWithoutSeed =
             case Map.lookup originalSeed board of
                 Just existingHex | existingHex == tHex -> Map.delete originalSeed board
@@ -506,7 +514,13 @@ repairSeed _ tHex originalSeed territory mapG
             where
                 ringCandidates = filter canUse $ toList currentRing
                 currentRing = distanceSet dist (one originalSeed) `Set.difference` distanceSet (dist - 1) (one originalSeed)
-        canUse coord = coord `notMember` boardWithoutSeed && not (sameFeatureOutsideTerritory tHex Set.empty boardWithoutSeed coord)
+        canUse coord =
+            coord `notMember` boardWithoutSeed
+                && not (sameFeatureOutsideTerritory tHex Set.empty boardWithoutSeed coord)
+                && not (null repairedCandidates)
+            where
+                repairedMapG = (insert coord tHex boardWithoutSeed, snd mapG)
+                repairedCandidates = validGrowthCandidates tHex (one coord) repairedMapG
 
 furthestFromOrigin :: [CubeCoordinate Int] -> CubeCoordinate Int
 furthestFromOrigin [] = originCoordinate
@@ -558,11 +572,14 @@ chooseRandomGrowth originalSeed _ options mapG
                 distToSeed = cubeCoordinateDistFloor originalSeed coord
 
 riverGrowthCandidates :: TerrainHex -> HexSet -> (HexMap, g) -> HexSet
-riverGrowthCandidates tHex territory mapG =
-    Set.filter keepsRiverChain $ fromList $ concatMap candidateNeighbors riverEnds
+riverGrowthCandidates tHex territory mapG
+    | null directedCandidates = chainCandidates
+    | otherwise = directedCandidates
     where
         baseCandidates = validGrowthCandidates tHex territory mapG
-        endpoint coord = territoryNeighborCount territory coord == 1
+        endpoint coord
+            | Set.size territory == 1 = territoryNeighborCount territory coord == 0
+            | otherwise = territoryNeighborCount territory coord == 1
         territoryList = toList territory
         endpointHexes = filter endpoint territoryList
         endpointDistances = map (cubeCoordinateDistFloor originCoordinate) endpointHexes
@@ -571,8 +588,14 @@ riverGrowthCandidates tHex territory mapG =
             dist:restDists -> foldl' max dist restDists
         riverEnds = filter ((== maxDist) . cubeCoordinateDistFloor originCoordinate) endpointHexes
         candidateNeighbors coord = filter (`member` baseCandidates) (adjacentCubeCoordinates coord)
-        keepsRiverChain coord =
-            cubeCoordinateDistFloor originCoordinate coord >= maxDist && territoryNeighborCount territory coord <= 1
+        furthestChainCandidates = Set.filter keepsRiverChain $ fromList $ concatMap candidateNeighbors riverEnds
+        allEndpointCandidates = Set.filter keepsRiverChain $ fromList $ concatMap candidateNeighbors endpointHexes
+        chainCandidates
+            | null furthestChainCandidates = allEndpointCandidates
+            | otherwise = furthestChainCandidates
+        directedCandidates = Set.filter keepsRiverDirection furthestChainCandidates
+        keepsRiverChain coord = territoryNeighborCount territory coord <= 1
+        keepsRiverDirection coord = cubeCoordinateDistFloor originCoordinate coord >= maxDist
 
 coastalGrowthCandidates :: TerrainHex -> HexSet -> (HexMap, g) -> HexSet
 coastalGrowthCandidates tHex territory mapG = closestToOriginSet filtered

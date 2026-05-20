@@ -41,7 +41,8 @@ import Test.Hspec
 import Test.QuickCheck
 
 import Game.Core.Primitives
-    ( CubeCoordinate
+    ( adjacentCubeCoordinates
+    , CubeCoordinate
     , CubeCoordinateTokens (CubeCoordinateTokens)
     , GameColor (Black)
     , isUnitCubeDist
@@ -63,6 +64,8 @@ import Game.CursedTreasure.API
     , fillHexOcean
     , getGameSetupPlayers
     , getConnectedSets
+    , GrowthRule (..)
+    , growTerrainSeeds
     , heuristicHint
     , isRaisingTreasure
     , isValidTerrainBoard
@@ -178,6 +181,79 @@ spec = do
     describe "fillHexOcean" $ do
         it "matches radius-2 oceanification for a rhombus while preserving land" $ do
             fst (fillHexOcean (oceanifyTestLandBoard, mkStdGen 0)) `shouldBe` oceanifyBoard oceanifyTestLandBoard
+
+    describe "growTerrainSeeds" $ do
+        it "adds 11 river hexes and 3 ocean hexes after the lagoon stage" $
+            property $ \randomSeed ->
+                let emptyHexMapG = (Map.empty, mkStdGen randomSeed)
+                    lagoonTerrainBoardG = growTerrainSeeds
+                        (RandomGrowth, [10,6,4]) (TerrainHex False Lagoon []) emptyHexMapG
+                    riverTerrainBoardG = growTerrainSeeds
+                        (RiverGrowth, [5,3,3]) (TerrainHex False River []) lagoonTerrainBoardG
+                    lagoonBoard = fst lagoonTerrainBoardG
+                    riverBoard = fst riverTerrainBoardG
+                    newRiverHexes = addedHexes lagoonBoard riverBoard
+                    riverHexCount = countFeature River newRiverHexes
+                    oceanHexCount = countFeature Ocean newRiverHexes
+                    riverDelta = Map.size riverBoard - Map.size lagoonBoard
+                 in counterexample (riverGrowthFailureMessage randomSeed lagoonBoard riverBoard newRiverHexes) $
+                        conjoin
+                            [ counterexample "river stage should add 14 hexes over the lagoon stage" $ riverDelta === 14
+                            , counterexample "river stage should preserve all lagoon hexes" $ preservesHexes lagoonBoard riverBoard
+                            , counterexample "river stage should add exactly 11 river hexes" $ riverHexCount === 11
+                            , counterexample "river stage should add exactly 3 ocean hexes" $ oceanHexCount === 3
+                            ]
+
+        it "adds one terminal ocean end-cap per river chain" $
+            property $ \randomSeed ->
+                let emptyHexMapG = (Map.empty, mkStdGen randomSeed)
+                    lagoonTerrainBoardG = growTerrainSeeds
+                        (RandomGrowth, [10,6,4]) (TerrainHex False Lagoon []) emptyHexMapG
+                    riverTerrainBoardG = growTerrainSeeds
+                        (RiverGrowth, [5,3,3]) (TerrainHex False River []) lagoonTerrainBoardG
+                    lagoonBoard = fst lagoonTerrainBoardG
+                    riverBoard = fst riverTerrainBoardG
+                    newRiverHexes = addedHexes lagoonBoard riverBoard
+                    terminalOceanHexes = featureHexes Ocean newRiverHexes
+                 in counterexample (riverGrowthFailureMessage randomSeed lagoonBoard riverBoard newRiverHexes) $
+                        conjoin
+                            [ counterexample "river stage should add exactly 3 terminal ocean hexes" $
+                                Map.size terminalOceanHexes === 3
+                            , counterexample "each terminal ocean hex should touch at least one river hex" $
+                                all (isTerminalOceanHex riverBoard) (Map.keys terminalOceanHexes)
+                            ]
+
+        it "preserves earlier terrain across each later growth stage" $
+            property $ \randomSeed ->
+                let emptyHexMapG = (Map.empty, mkStdGen randomSeed)
+                    lagoonTerrainBoardG = growTerrainSeeds
+                        (RandomGrowth, [10,6,4]) (TerrainHex False Lagoon []) emptyHexMapG
+                    riverTerrainBoardG = growTerrainSeeds
+                        (RiverGrowth, [5,3,3]) (TerrainHex False River []) lagoonTerrainBoardG
+                    mountainTerrainBoardG = growTerrainSeeds
+                        (RandomGrowth, [12,8,6]) (TerrainHex False Mountain []) riverTerrainBoardG
+                    jungleTerrainBoardG = growTerrainSeeds
+                        (RandomGrowth, [16,10,6]) (TerrainHex False Jungle []) mountainTerrainBoardG
+                    meadowTerrainBoardG = growTerrainSeeds
+                        (RandomGrowth, [10,6,4]) (TerrainHex False Meadow []) jungleTerrainBoardG
+                    beachTerrainBoardG = growTerrainSeeds
+                        (CoastalGrowth, [6,5,4,3]) (TerrainHex False Beach []) meadowTerrainBoardG
+                    allTerrainBoardG = fillHexOcean beachTerrainBoardG
+                    lagoonBoard = fst lagoonTerrainBoardG
+                    riverBoard = fst riverTerrainBoardG
+                    mountainBoard = fst mountainTerrainBoardG
+                    jungleBoard = fst jungleTerrainBoardG
+                    meadowBoard = fst meadowTerrainBoardG
+                    beachBoard = fst beachTerrainBoardG
+                    oceanBoard = fst allTerrainBoardG
+                 in counterexample (boardGrowthFailureMessage randomSeed lagoonBoard riverBoard mountainBoard jungleBoard meadowBoard beachBoard oceanBoard) $
+                        conjoin
+                            [ counterexample "mountain stage should preserve all prior river-stage hexes" $ preservesHexes riverBoard mountainBoard
+                            , counterexample "jungle stage should preserve all prior mountain-stage hexes" $ preservesHexes mountainBoard jungleBoard
+                            , counterexample "meadow stage should preserve all prior jungle-stage hexes" $ preservesHexes jungleBoard meadowBoard
+                            , counterexample "beach stage should preserve all prior meadow-stage hexes" $ preservesHexes meadowBoard beachBoard
+                            , counterexample "fillHexOcean should preserve all prior beach-stage hexes" $ preservesHexes beachBoard oceanBoard
+                            ]
 
     describe "canned boards" $ do
         it "tracks bare board #1 territories in getConnectedSets format" $ do
@@ -2621,3 +2697,58 @@ isJeepToken _ = False
 isClueMarkerToken :: TerrainToken -> Bool
 isClueMarkerToken (ClueToken _) = True
 isClueMarkerToken _ = False
+
+preservesHexes :: HexMap -> HexMap -> Bool
+preservesHexes previous current =
+        all unchanged (Map.toList previous)
+    where
+        unchanged (coord, expectedHex) = Map.lookup coord current == Just expectedHex
+
+addedHexes :: HexMap -> HexMap -> HexMap
+addedHexes previous current =
+        Map.filterWithKey (\coord _ -> Map.notMember coord previous) current
+
+countFeature :: Feature -> HexMap -> Int
+countFeature wantedFeature =
+        length . filter matchesFeature . Map.elems
+    where
+        matchesFeature (TerrainHex _ feature _) = feature == wantedFeature
+
+featureHexes :: Feature -> HexMap -> HexMap
+featureHexes wantedFeature =
+        Map.filter matchesFeature
+    where
+        matchesFeature (TerrainHex _ feature _) = feature == wantedFeature
+
+isTerminalOceanHex :: HexMap -> CubeCoordinate Int -> Bool
+isTerminalOceanHex board coord = riverNeighborCount >= 1
+    where
+        riverNeighborCount = length $ filter isRiverNeighbor (adjacentCubeCoordinates coord)
+        isRiverNeighbor neighbor =
+            case Map.lookup neighbor board of
+                Just (TerrainHex _ River _) -> True
+                _ -> False
+
+boardGrowthFailureMessage :: Int -> HexMap -> HexMap -> HexMap -> HexMap -> HexMap -> HexMap -> HexMap -> String
+boardGrowthFailureMessage randomSeed lagoonBoard riverBoard mountainBoard jungleBoard meadowBoard beachBoard oceanBoard =
+    mconcat
+        [ "seed=" <> show randomSeed <> "\n"
+        , "lagoon size=" <> show (Map.size lagoonBoard) <> "\n"
+        , "river size=" <> show (Map.size riverBoard) <> "\n"
+        , "mountain size=" <> show (Map.size mountainBoard) <> "\n"
+        , "jungle size=" <> show (Map.size jungleBoard) <> "\n"
+        , "meadow size=" <> show (Map.size meadowBoard) <> "\n"
+        , "beach size=" <> show (Map.size beachBoard) <> "\n"
+        , "ocean size=" <> show (Map.size oceanBoard) <> "\n"
+        ]
+
+riverGrowthFailureMessage :: Int -> HexMap -> HexMap -> HexMap -> String
+riverGrowthFailureMessage randomSeed lagoonBoard riverBoard newRiverHexes =
+    mconcat
+        [ "seed=" <> show randomSeed <> "\n"
+        , "lagoon size=" <> show (Map.size lagoonBoard) <> "\n"
+        , "river size=" <> show (Map.size riverBoard) <> "\n"
+        , "river delta size=" <> show (Map.size riverBoard - Map.size lagoonBoard) <> "\n"
+        , "new river hexes=" <> show (countFeature River newRiverHexes) <> "\n"
+        , "new ocean hexes=" <> show (countFeature Ocean newRiverHexes) <> "\n"
+        ]
