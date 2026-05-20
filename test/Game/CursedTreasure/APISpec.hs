@@ -1544,6 +1544,8 @@ spec = do
                         , IsOn (FeatureClue False Meadow)
                         , IsNotOn (FeatureClue False Lagoon)
                         , WithinStepsOf 1 (TokenClue Hut)
+                        , NotWithinStepsOf 2 (FeatureClue False River)
+                        , IsOn StatueClue
                         ]
                     drawnClues =
                         [ IsOn (TokenClue Hut)
@@ -1568,7 +1570,46 @@ spec = do
                     resultState = runMakeMoveDirect initialState ExchangeClueCards
                     resultPlayer = playerStateById activePlayerId resultState
                 take 4 resultPlayer.clues `shouldMatchList` drawnClues
+                length resultPlayer.clues `shouldBe` 6
                 playerBudgets resultPlayer `shouldBe` (0, 0, 0, 1, 0)
+
+            it "redraws back to exactly four clues for ExchangeClueCards in games with more than two players" $ do
+                let threePlayerGameState = fst $ createNewGame (take 3 getGameSetupPlayers) 67890
+                    initialThreePlayerState =
+                        case threePlayerGameState.players of
+                            firstPlayerState : _ -> firstPlayerState
+                            [] -> error "Expected at least one player"
+                    originalClues =
+                        [ IsOn (FeatureClue False Jungle)
+                        , IsOn (FeatureClue False Meadow)
+                        , IsNotOn (FeatureClue False Lagoon)
+                        , WithinStepsOf 1 (TokenClue Hut)
+                        ]
+                    drawnClues =
+                        [ IsOn (TokenClue Hut)
+                        , IsNotOn (TokenClue PalmTree)
+                        , WithinStepsOf 2 (FeatureClue False Beach)
+                        , NotWithinStepsOf 1 StatueClue
+                        ]
+                    playerState =
+                        initialThreePlayerState
+                            { clues = originalClues
+                            , availableJeepMoves = 3
+                            , availableCluePlays = 1
+                            , availableRemoveMarkers = 1
+                            , availablePickupAmulet = 1
+                            , availableClueCardExchange = 1
+                            }
+                    initialState =
+                        threePlayerGameState
+                            { players = playerState : drop 1 threePlayerGameState.players
+                            , activePlayer = playerState.player.playerId
+                            , clueDeck = (drawnClues, [])
+                            }
+                    resultState = runMakeMoveDirect initialState ExchangeClueCards
+                    resultPlayer = playerStateById playerState.player.playerId resultState
+                resultPlayer.clues `shouldMatchList` drawnClues
+                length resultPlayer.clues `shouldBe` 4
 
             it "picks up an amulet and consumes the pickup action for PickupAmulet" $ do
                 let playerState = basePlayerState { amulets = 0, availablePickupAmulet = 1 }

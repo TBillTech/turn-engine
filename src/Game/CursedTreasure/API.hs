@@ -1166,7 +1166,7 @@ exchangeCardsDirect :: GameState -> GameState
 exchangeCardsDirect gS =
     if isRight eDiscardUpds then dealCardsDirect 4 pId updatedState else updatedState
     where   pId = gS.activePlayer
-            (errDiscardUpd, toDiscardUpd, playerCluesUpd) = _eitherUpdates2 eDiscardUpds
+            (errDiscardUpd, playerCluesUpd, toDiscardUpd) = _eitherUpdates2 eDiscardUpds
             clueUpd = second toDiscardUpd
             playerDiscardUpd player = player { clues = playerCluesUpd player.clues }
             ePlayer = findPlayer pId gS
