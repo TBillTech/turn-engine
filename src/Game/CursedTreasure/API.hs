@@ -528,7 +528,7 @@ furthestFromOrigin (coord:coords) = foldl' pickFurther coord coords
     where
         originDist = cubeCoordinateDistFloor originCoordinate
         pickFurther best candidate
-            | originDist candidate > originDist best 
+            | originDist candidate > originDist best
                 = candidate
             | otherwise = best
 
@@ -547,7 +547,7 @@ closestToSeedSet seed options
         minDist = minDistanceClass (map (cubeCoordinateDistFloor seed) (toList options))
 
 minDistanceClass :: [Int] -> Int
-minDistanceClass dists = maybe maxBound minimum1 $ nonEmpty dists  
+minDistanceClass dists = maybe maxBound minimum1 $ nonEmpty dists
 
 chooseUniformSet :: RandomGen g => HexSet -> (HexMap, g) -> Maybe (CubeCoordinate Int, g)
 chooseUniformSet options mapG
@@ -1246,7 +1246,7 @@ raiseTreasureFinished s =
             score player = player.amulets + 10 * sum (map toInt player.foundTreasures)
             scorePlayer player = player { score = CurrentScore $ score player}
             maxS = maybe 0 maximum1 $ nonEmpty (score <$> s.players)
-            checkGameWinner gS  | isNothing mCards = gS & playersL %~ (setWinner <$>) & gameOverL %~ const True
+            checkGameWinner gS  | null (fst gS.treasureDeck) = gS & playersL %~ (setWinner <$>) & gameOverL %~ const True
                                 | otherwise = gS
             setWinner player = player { score = if CurrentScore maxS == player.score
                                                 then WinnerScore maxS else player.score }
@@ -1392,7 +1392,7 @@ makeMoveDirect gS (MoveJeep i j) = censorGame $
             mSourceFeature = do
                 (coord, _) <- findFirstToken (PlayerJeep pId) (getHexMap gS.terrainBoard)
                 terrainFeatureAt coord gS
-            moveCost = fromMaybe 1 $ jeepMoveCost mSourceFeature <$> terrainFeatureAt (mkCubeCoordinate i j) gS
+            moveCost = maybe 1 (jeepMoveCost mSourceFeature) (terrainFeatureAt (mkCubeCoordinate i j) gS)
             playerUsedOptions
                 | isForcedPlacement = id
                 | otherwise = \player -> player { availableJeepMoves = player.availableJeepMoves - moveCost
