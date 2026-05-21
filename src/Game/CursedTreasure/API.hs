@@ -1200,11 +1200,7 @@ raiseTreasureFinished s =
       & setActivePlayer
       & playersL %~ (scorePlayer <$>)
       & checkGameWinner
-    where   mCards :: Maybe (NonEmpty TreasureCard)
-            mCards = do
-                raising <- s.raisingTreasure
-                nonEmpty (fst raising.rtTreasureChest)
-            clearRaising gS = gS { raisingTreasure = Nothing }
+    where   clearRaising gS = gS { raisingTreasure = Nothing }
             refreshStatueAmulets board = foldr applyStatueEffect board (statueLocations board)
             applyStatueEffect (coord, hourHand) board = addFinalAmulet coord hourHand (rotateStatue coord hourHand board)
             rotateStatue coord hourHand = alterTokenList (map rotateToken) (Just coord)
