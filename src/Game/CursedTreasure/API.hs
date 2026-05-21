@@ -375,7 +375,10 @@ data GrowthRule = RandomGrowth | RiverGrowth | CoastalGrowth
 -- | Seeds and then grows one feature across multiple independent clusters.
 -- | Note that addTerrainSeeds when tHex is Mountain is expected to set the first Mountain seed to (0,0)
 growTerrainSeeds :: RandomGen g => (GrowthRule, [Int]) -> TerrainHex -> (HexMap, g) -> (HexMap, g)
-growTerrainSeeds (rule, sizes) tHex mg = grownG
+growTerrainSeeds (rule, sizes) tHex mg =
+    case rule of
+        RiverGrowth -> addRiverTerminalOceans grownG
+        _ -> grownG
     where   (seeds, withSeedsG) = addTerrainSeeds (length sizes) tHex mg
             initialSize size = case rule of
                 RiverGrowth -> max 0 (size - 1)
@@ -444,7 +447,7 @@ growTerrainSeed seeds RandomGrowth tHex (i, originalSeed, territory) mapG =
             growTerrainSeed seeds RandomGrowth tHex (i - 1, repairedSeed, Set.insert toAdd repairedTerritory) mapG'
             where
                 mapG' = (insert toAdd tHex $ fst repairedMapG, g')
-growTerrainSeed _ RiverGrowth _ (-1, _, _) mapG = mapG -- Stopping at -1 is for the Terminal Ocean tile
+growTerrainSeed _ RiverGrowth _ (0, _, _) mapG = mapG
 growTerrainSeed seeds RiverGrowth tHex (i, originalSeed, territory) mapG =
     maybe repairedMapG continueGrowth nextChoice
     where
@@ -454,9 +457,7 @@ growTerrainSeed seeds RiverGrowth tHex (i, originalSeed, territory) mapG =
         continueGrowth (toAdd, g') =
             growTerrainSeed seeds RiverGrowth tHex (i - 1, repairedSeed, Set.insert toAdd repairedTerritory) mapG'
             where
-                usedTHex | i == 0 = TerrainHex True Ocean []
-                         | otherwise = tHex
-                mapG' = (insert toAdd usedTHex $ fst repairedMapG, g')
+                mapG' = (insert toAdd tHex $ fst repairedMapG, g')
 growTerrainSeed _ CoastalGrowth _ (0, _, _) mapG = mapG
 growTerrainSeed seeds CoastalGrowth tHex (i, originalSeed, territory) mapG =
     maybe repairedMapG continueGrowth nextChoice
@@ -573,7 +574,7 @@ chooseRandomGrowth originalSeed _ options mapG
 
 riverGrowthCandidates :: TerrainHex -> HexSet -> (HexMap, g) -> HexSet
 riverGrowthCandidates tHex territory mapG
-    | null directedCandidates = chainCandidates
+    | null directedCandidates = fallbackChainCandidates
     | otherwise = directedCandidates
     where
         baseCandidates = validGrowthCandidates tHex territory mapG
@@ -590,12 +591,57 @@ riverGrowthCandidates tHex territory mapG
         candidateNeighbors coord = filter (`member` baseCandidates) (adjacentCubeCoordinates coord)
         furthestChainCandidates = Set.filter keepsRiverChain $ fromList $ concatMap candidateNeighbors riverEnds
         allEndpointCandidates = Set.filter keepsRiverChain $ fromList $ concatMap candidateNeighbors endpointHexes
+        anyChainCandidates = Set.filter keepsRiverChain baseCandidates
         chainCandidates
             | null furthestChainCandidates = allEndpointCandidates
             | otherwise = furthestChainCandidates
+        fallbackChainCandidates
+            | null chainCandidates && null anyChainCandidates = baseCandidates
+            | null chainCandidates = anyChainCandidates
+            | otherwise = chainCandidates
         directedCandidates = Set.filter keepsRiverDirection furthestChainCandidates
         keepsRiverChain coord = territoryNeighborCount territory coord <= 1
         keepsRiverDirection coord = cubeCoordinateDistFloor originCoordinate coord >= maxDist
+
+riverTerminalOceanCandidates :: TerrainHex -> HexSet -> (HexMap, g) -> HexSet
+riverTerminalOceanCandidates _ territory mapG
+    | null furthestCandidates = allEndpointCandidates
+    | otherwise = furthestCandidates
+    where
+        board = fst mapG
+        baseCandidates = getBoundarySet (`notMember` board) territory
+        endpoint coord
+            | Set.size territory == 1 = territoryNeighborCount territory coord == 0
+            | otherwise = territoryNeighborCount territory coord == 1
+        endpointHexes = filter endpoint (toList territory)
+        endpointDistances = map (cubeCoordinateDistFloor originCoordinate) endpointHexes
+        maxDist = case endpointDistances of
+            [] -> 0
+            dist:restDists -> foldl' max dist restDists
+        riverEnds = filter ((== maxDist) . cubeCoordinateDistFloor originCoordinate) endpointHexes
+        candidateNeighbors coord = filter (`member` baseCandidates) (adjacentCubeCoordinates coord)
+        furthestCandidates = fromList $ concatMap candidateNeighbors riverEnds
+        allEndpointCandidates = fromList $ concatMap candidateNeighbors endpointHexes
+
+addRiverTerminalOceans :: RandomGen g => (HexMap, g) -> (HexMap, g)
+addRiverTerminalOceans mapG = (boardWithOceans, g')
+    where
+        board = fst mapG
+        riverTerritories =
+            [ fromList (keys territoryMap)
+            | (feature, territoryMaps) <- getConnectedSets board
+            , feature == River
+            , territoryMap <- territoryMaps
+            ]
+        (oceanCoords, g') = foldl' chooseOcean (Set.empty, snd mapG) riverTerritories
+        boardWithOceans = foldl' (flip (`insert` TerrainHex True Ocean [])) board oceanCoords
+        chooseOcean (chosenCoords, gen) territory =
+            case chooseUniformSet availableOptions (board, gen) of
+                Nothing -> (chosenCoords, gen)
+                Just (coord, gen') -> (Set.insert coord chosenCoords, gen')
+            where
+                availableOptions = riverTerminalOceanCandidates (TerrainHex False River []) territory (board, gen)
+                    `Set.difference` chosenCoords
 
 coastalGrowthCandidates :: TerrainHex -> HexSet -> (HexMap, g) -> HexSet
 coastalGrowthCandidates tHex territory mapG = closestToOriginSet filtered
