@@ -1053,7 +1053,7 @@ matchClueCard board (WithinStepsOf n obj) k v
     where   isObj = matchObject obj
             bounds = Map.restrictKeys board boundSet
             boundSet = distanceSet n (one k) `Set.difference` one k
-matchClueCard board (NotWithinStepsOf n obj) k _ = null (findLocations isObj bounds)
+matchClueCard board (NotWithinStepsOf n obj) k v = matchClueCard board (IsOn obj) k v || null (findLocations isObj bounds)
     where   isObj = matchObject obj
             bounds = Map.restrictKeys board boundSet
             boundSet = distanceSet n (one k) `Set.difference` one k

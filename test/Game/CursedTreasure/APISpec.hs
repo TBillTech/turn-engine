@@ -568,6 +568,19 @@ spec = do
                     Map.keys beforeMarkers `shouldMatchList` [jungleCoord, meadowCoord]
                     Map.keys afterMarkers `shouldBe` [jungleCoord]
 
+            it "keeps markers on the named feature when applying NotWithinStepsOf 1 for that feature" $ do
+                let board =
+                        placeClueMarker firstClueColor origin
+                            $ Map.fromList
+                                [ (origin, TerrainHex False Jungle [])
+                                , (adjacentOrigin, TerrainHex False Jungle [])
+                                , (farOrigin, TerrainHex False Meadow [])
+                                ]
+                    (beforeMarkers, afterMarkers) = applyClue board (firstClueColor, NotWithinStepsOf 1 (FeatureClue False Jungle))
+                 in do
+                    Map.keys beforeMarkers `shouldBe` [origin]
+                    Map.keys afterMarkers `shouldBe` [origin]
+
         describe "enumeratePossibleCluePlays" $ do
             it "offers clue plays that strictly narrow a clue color's candidate set" $ do
                 let playerState =
