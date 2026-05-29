@@ -1401,7 +1401,7 @@ spec = do
 
                 gameActivePlayer stateAfterPlayerTwoAccept `shouldBe` activePlayerId
                 raisingTreasureChest treasureAfterPlayerTwoAccept `shouldBe` ([Curse], [Treasure 4])
-                raisingTreasureOrder treasureAfterPlayerTwoAccept `shouldBe` [secondPlayerId, activePlayerId]
+                raisingTreasureOrder treasureAfterPlayerTwoAccept `shouldBe` [activePlayerId]
                 (playerStateById secondPlayerId stateAfterPlayerTwoAccept).foundTreasures
                     `shouldMatchList` [Treasure 3, Treasure 7, Treasure 5]
                 enumerateActivePlayerOptions stateAfterPlayerTwoAccept
@@ -1411,6 +1411,61 @@ spec = do
                 (playerStateById activePlayerId resolvedState).foundTreasures
                     `shouldMatchList` [Treasure 4, Treasure 6, Treasure 8]
                 gameActivePlayer resolvedState `shouldBe` gamePlayerTurn resolvedState
+
+            it "removes a chooser completely after resolving a curse even when they appear multiple times in rtOrder" $ do
+                let treasureState =
+                        RaisingTreasureState
+                            { rtTreasureChest = ([Curse], [])
+                            , rtOrder = [activePlayerId, secondPlayerId, activePlayerId]
+                            , rtPlayerIndex = 0
+                            , rtViewing = [activePlayerId, secondPlayerId]
+                            }
+                    playerOne =
+                        basePlayerState
+                            { amulets = 1
+                            , foundTreasures = [Treasure 8, Treasure 6, Treasure 4]
+                            }
+                    playerTwo =
+                        secondBasePlayerState
+                            { foundTreasures = [Treasure 7, Treasure 5, Treasure 3]
+                            }
+                    initialState =
+                        baseGameState
+                            { players = [playerOne, playerTwo]
+                            , raisingTreasure = Just treasureState
+                            , activePlayer = activePlayerId
+                            }
+                    stateAfterPlayerOneView = fst (makeMove initialState RaisingTreasurePass)
+                    stateAfterViewing = fst (makeMove stateAfterPlayerOneView RaisingTreasurePass)
+                    stateAfterCurseResolution = fst (makeMove stateAfterViewing RaisingTreasureWardCurse)
+                    treasureAfterPlayerOneView = getRaisingTreasureState stateAfterPlayerOneView
+                    treasureAfterViewing = getRaisingTreasureState stateAfterViewing
+                    treasureAfterCurseResolution = getRaisingTreasureState stateAfterCurseResolution
+                gameActivePlayer initialState `shouldBe` activePlayerId
+                raisingTreasureChest treasureState `shouldBe` ([Curse], [])
+                raisingTreasureOrder treasureState `shouldBe` [activePlayerId, secondPlayerId, activePlayerId]
+                enumerateActivePlayerOptions initialState
+                    `shouldMatchList` [RaisingTreasurePass]
+
+                gameActivePlayer stateAfterPlayerOneView `shouldBe` secondPlayerId
+                raisingTreasureChest treasureAfterPlayerOneView `shouldBe` ([Curse], [])
+                raisingTreasureViewing treasureAfterPlayerOneView `shouldBe` [secondPlayerId]
+                enumerateActivePlayerOptions stateAfterPlayerOneView
+                    `shouldMatchList` [RaisingTreasurePass]
+
+                gameActivePlayer stateAfterViewing `shouldBe` activePlayerId
+                raisingTreasureChest treasureAfterViewing `shouldBe` ([Curse], [])
+                raisingTreasureOrder treasureAfterViewing `shouldBe` [activePlayerId, secondPlayerId, activePlayerId]
+                raisingTreasureViewing treasureAfterViewing `shouldBe` []
+                enumerateActivePlayerOptions stateAfterViewing
+                    `shouldMatchList` [RaisingTreasureAcceptCurse, RaisingTreasureWardCurse]
+
+                gameActivePlayer stateAfterCurseResolution `shouldBe` secondPlayerId
+                raisingTreasureChest treasureAfterCurseResolution `shouldBe` ([Curse], [])
+                raisingTreasureOrder treasureAfterCurseResolution `shouldBe` [secondPlayerId]
+                (playerStateById activePlayerId stateAfterCurseResolution).amulets `shouldBe` 0
+                enumerateActivePlayerOptions stateAfterCurseResolution
+                    `shouldMatchList` [RaisingTreasureAcceptCurse]
 
             it "does not reduce any budgets for a forced opening jeep placement" $ do
                 let playerState =
@@ -1805,7 +1860,8 @@ spec = do
                             }
                     resultState = runMakeMoveDirect initialState RaisingTreasureWardCurse
                 (playerStateById activePlayerId resultState).amulets `shouldBe` 1
-                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
+                raisingTreasureOrder (getRaisingTreasureState resultState) `shouldBe` [player2Id]
+                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 0
                 gameActivePlayer resultState `shouldBe` player2Id
 
             it "finishes treasure raising after the last chooser wards a curse" $ do
@@ -1896,7 +1952,8 @@ spec = do
                             }
                     resultState = runMakeMoveDirect initialState RaisingTreasureAcceptCurse
                 (playerStateById activePlayerId resultState).foundTreasures `shouldMatchList` [Treasure 3, Treasure 7, Treasure 5]
-                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 1
+                raisingTreasureOrder (getRaisingTreasureState resultState) `shouldBe` [player2Id]
+                raisingTreasureIndex (getRaisingTreasureState resultState) `shouldBe` 0
                 gameActivePlayer resultState `shouldBe` player2Id
 
             it "finishes treasure raising after the last chooser accepts a curse" $ do

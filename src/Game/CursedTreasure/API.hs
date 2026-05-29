@@ -1531,15 +1531,17 @@ makeMoveDirect gS RaisingTreasureTake = censorGame $
                                 , rtOrder = removePlayerIndex rT.rtOrder }
             removePlayerIndex pList = take playerIndex pList <> drop (playerIndex + 1) pList
 makeMoveDirect gS RaisingTreasureWardCurse
-    | isLastChooser gS = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureFinished
-    | otherwise = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureNextChooser
+    = censorGame $ gS & playerL pId %~ decrAmulet & raiseTreasureL %~ (removeChooser <$>) & raiseTreasureChooseStart
     where   pId = gS.activePlayer
             decrAmulet player = player { amulets = player.amulets - 1 }
+            removeChooser rt = rt { rtOrder = filter (/= pId) rt.rtOrder
+                                  , rtPlayerIndex = 0 }
 makeMoveDirect gS RaisingTreasureAcceptCurse
-    | isLastChooser gS = censorGame $ gS & playerL pId %~ loseTreasure & raiseTreasureFinished
-    | otherwise = censorGame $ gS & playerL pId %~ loseTreasure & raiseTreasureNextChooser
+    = censorGame $ gS & playerL pId %~ loseTreasure & raiseTreasureL %~ (removeChooser <$>) & raiseTreasureChooseStart
     where   pId = gS.activePlayer
             loseTreasure player = player { foundTreasures = loseMax $ nonEmpty player.foundTreasures }
+            removeChooser rt = rt { rtOrder = filter (/= pId) rt.rtOrder
+                                  , rtPlayerIndex = 0 }
             loseMax :: Maybe (NonEmpty TreasureCard) -> [TreasureCard]
             loseMax Nothing = []
             loseMax (Just ts) = let maxT = maximum1 ts
