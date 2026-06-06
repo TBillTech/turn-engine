@@ -26,7 +26,7 @@ The executable also exposes non-service helper modes that are useful while devel
 
 - `..\turn-engine\turn-engine.exe --version`: print the executable version and exit.
 - `..\turn-engine\turn-engine.exe --test-example <request-file> <response-file>`: deserialize the request example, run it through the engine, and fail if the expected response file does not deserialize or does not match the engine output.
-- `..\turn-engine\turn-engine.exe --move_example_request CursedTreasure <PlayerMove>`: print a `makeMove` request whose `playerMove` uses the requested constructor and whose `gameState` is curated so that constructor is legal.
+- `..\turn-engine\turn-engine.exe --move_example_request CursedTreasure <PlayerMove>`: deprecated helper that prints a `makeMove` request whose `playerMove` uses the requested constructor and whose `gameState` is curated so that constructor is legal. This is being phased out because it hard-bakes move details and full-state payloads that the planned tool-based, query-oriented API intends to hide.
 - `..\turn-engine\turn-engine.exe --example CursedTreasure`: print the full built-in example transcript.
 - `..\turn-engine\turn-engine.exe --example CursedTreasure summary`: print the summary text for the example state.
 - `..\turn-engine\turn-engine.exe --example CursedTreasure request 3`: print a specific example request line.
@@ -34,6 +34,8 @@ The executable also exposes non-service helper modes that are useful while devel
 - `..\turn-engine\turn-engine.exe --dumbplay 100 CursedTreasure`: run repeated AI-only games and print aggregate stats.
 
 If the executable is not on your `PATH`, always invoke it by relative or absolute path as shown above.
+
+`--move_example_request` remains available for fixture maintenance, but it should be treated as legacy documentation support rather than a forward-looking client integration surface.
 
 ## Generic Service Protocol
 

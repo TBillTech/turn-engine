@@ -51,19 +51,31 @@ library
         Game.Core.API
         Game.Core.Primitives
         Game.Core.Types
+        Game.VoxelVerse.API
+        Game.VoxelVerse.Query
+        Game.VoxelVerse.Types
         Game.ArtOfWar.API
+        Game.ArtOfWar.VoxelVerse.API
+        Game.ArtOfWar.VoxelVerse.Types
         Game.CursedTreasure.API
         Game.CursedTreasure.Types
+        Game.CursedTreasure.VoxelVerse.API
+        Game.CursedTreasure.VoxelVerse.Types
         Game.FogOfBattle.API
         Game.FogOfBattle.Types
+        Game.FogOfBattle.VoxelVerse.API
+        Game.FogOfBattle.VoxelVerse.Types
         Game.RealEstate.API
         Game.ArtOfWar.Types
+        Game.RealEstate.VoxelVerse.API
+        Game.RealEstate.VoxelVerse.Types
         Game.RealEstate.Types
     build-depends:
         random ^>=1.3.1,
         microlens-platform,
         aeson >= 2.2,
-        bytestring
+        bytestring,
+        transformers
 
 executable turn-engine
     import:           common-options
