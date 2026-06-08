@@ -4,9 +4,12 @@ module Game.CursedTreasure.Types
     , ClueColor(..)
     , OtherColor(..)
     , PlayerId
-    , mkPlayerId
-    , unPlayerId
     , allPlayerIds
+    , allowedPlayerIds
+    , validatePlayerIdForRuleset
+    , validatePlayerSequence
+    , validateSetupPlayers
+    , validateGameState
     , Feature(..)
     , allFeatures
     , ClueObject(..)
@@ -39,10 +42,12 @@ module Game.CursedTreasure.Types
     )
 where
 
-import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), withScientific)
+import Data.Aeson (FromJSON, ToJSON)
+import qualified Data.List as List
 
 import Game.Core.Primitives (CubeCoordinateTokens, CubeCoordinate,
-    HourHand, GameColor (..), ToGameColor(..), allGameColors)
+    HourHand, GameColor (..), PlayerId, ToGameColor(..), allGameColors, allPlayerIds,
+    SeedStream, mkSeedStream)
 
 newtype PlayerColor = PlayerColor GameColor
     deriving stock (Show, Eq, Generic)
@@ -64,28 +69,21 @@ newtype OtherColor = OtherColor GameColor
     deriving stock (Show, Eq, Generic)
     deriving newtype (FromJSON, ToJSON)
 
-newtype PlayerId = PlayerId Int
-    deriving stock (Show, Eq, Ord, Generic)
+allowedPlayerIds :: [PlayerId]
+allowedPlayerIds = take 4 allPlayerIds
 
-mkPlayerId :: Int -> Maybe PlayerId
-mkPlayerId playerId
-    | playerId `elem` [1 .. 4] = Just (PlayerId playerId)
-    | otherwise = Nothing
+validatePlayerIdForRuleset :: PlayerId -> Either Text PlayerId
+validatePlayerIdForRuleset playerId
+    | playerId `elem` allowedPlayerIds = Right playerId
+    | otherwise = Left "Cursed Treasure playerId must be an integer from 1 to 4"
 
-unPlayerId :: PlayerId -> Int
-unPlayerId (PlayerId playerId) = playerId
-
-allPlayerIds :: [PlayerId]
-allPlayerIds = mapMaybe mkPlayerId [1 .. 4]
-
-instance FromJSON PlayerId where
-    parseJSON = withScientific "PlayerId" $ \value ->
-        case mkPlayerId (round value) of
-            Just playerId | fromIntegral (unPlayerId playerId) == value -> pure playerId
-            _ -> fail "PlayerId must be an integer from 1 to 4"
-
-instance ToJSON PlayerId where
-    toJSON = toJSON . unPlayerId
+validatePlayerSequence :: [PlayerId] -> Either Text [PlayerId]
+validatePlayerSequence playerIds = do
+    traverse_ validatePlayerIdForRuleset playerIds
+    when (hasDuplicates playerIds) $ Left "Cursed Treasure player ids must be unique"
+    pure playerIds
+  where
+        hasDuplicates ids = length ids /= length (List.nub ids)
 
 instance ToGameColor OtherColor where
     toGameColor :: OtherColor -> GameColor
@@ -97,7 +95,7 @@ mkPlayerColor c | c `elem` colorList = Just (PlayerColor c)
     where colorList = [Red, Green, Blue, Purple]
 
 allPlayerColors :: [PlayerColor]
-allPlayerColors = mapMaybe mkPlayerColor allGameColors   
+allPlayerColors = mapMaybe mkPlayerColor allGameColors
 
 mkClueColor :: GameColor -> Maybe ClueColor
 mkClueColor c | c `elem` colorList = Just (ClueColor c)
@@ -163,9 +161,9 @@ data PlayerState = PlayerState
     }
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
-data TerrainToken 
-    = PlayerJeep PlayerId 
-    | ClueToken ClueColor 
+data TerrainToken
+    = PlayerJeep PlayerId
+    | ClueToken ClueColor
     | Amulet
     | Hut
     | PalmTree
@@ -200,9 +198,21 @@ data GameState = GameState
     , raisingTreasure :: Maybe RaisingTreasureState
     , latestMessage :: Text
     , gameOver :: Bool
-    , seed :: (Int, Int)
+    , seed :: SeedStream
     }
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
+
+validateSetupPlayers :: [PlayerDescription] -> Either Text [PlayerDescription]
+validateSetupPlayers playerDescriptions = do
+    let playerIds = map (.playerId) playerDescriptions
+        playerColors = map (.playerColor) playerDescriptions
+    when (length playerDescriptions < 2 || length playerDescriptions > 4) $
+        Left "Cursed Treasure requires between 2 and 4 players"
+    void (validatePlayerSequence playerIds)
+    when (hasDuplicates playerColors) $ Left "Cursed Treasure player colors must be unique"
+    pure playerDescriptions
+  where
+        hasDuplicates values = length values /= length (List.nub values)
 
 class ToGameState a where
   toGameState :: a -> GameState
@@ -223,7 +233,7 @@ mkCensoredGameState g viewerId =
             , clueDeck = censorClueDeck g.clueDeck
             , treasureDeck = censorTreasureDeck g.treasureDeck
             , raisingTreasure = censorRaisingTreasure <$> g.raisingTreasure
-            , seed = (0, 0)
+            , seed = mkSeedStream 0 0
             }
   where
     censorPlayer viewId ps
@@ -249,12 +259,33 @@ instance ToGameState CensoredGameState where
     toGameState :: CensoredGameState -> GameState
     toGameState (CensoredGameState g) = g
 
+validateGameState :: GameState -> Either Text GameState
+validateGameState gameState = do
+    void (validateSetupPlayers (map (.player) gameState.players))
+    unless (gameState.playerTurn `elem` playerIds) $
+        Left "Cursed Treasure playerTurn must reference a player in the game"
+    unless (gameState.activePlayer `elem` playerIds) $
+        Left "Cursed Treasure activePlayer must reference a player in the game"
+    whenJust gameState.raisingTreasure validateRaisingTreasure
+    pure gameState
+  where
+    playerIds = map (.player.playerId) gameState.players
+    validateRaisingTreasure raisingTreasureState = do
+        void (validatePlayerSequence raisingTreasureState.rtOrder)
+        traverse_ validatePlayerIdForRuleset raisingTreasureState.rtViewing
+        when (any (`notElem` playerIds) raisingTreasureState.rtOrder) $
+            Left "Cursed Treasure raising treasure order must reference players in the game"
+        when (any (`notElem` playerIds) raisingTreasureState.rtViewing) $
+            Left "Cursed Treasure raising treasure viewers must reference players in the game"
+        when (raisingTreasureState.rtPlayerIndex < 0 || raisingTreasureState.rtPlayerIndex >= length raisingTreasureState.rtOrder) $
+            Left "Cursed Treasure raising treasure player index is out of bounds"
+
 data RaisingTreasureState = RaisingTreasureState
     { rtTreasureChest :: Deck TreasureCard
     , rtOrder :: [PlayerId]
     , rtPlayerIndex :: Int
     , rtViewing :: [PlayerId]
-    } 
+    }
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 -- | Player Move for Cursed Treasure game.
@@ -265,7 +296,7 @@ data PlayerMove = PlayerMoveError Text
     | ExchangeClueCards
     | PickupAmulet
     | UseAmuletIncrMove
-    | UseAmuletPlayClue ClueColor ClueCard 
+    | UseAmuletPlayClue ClueColor ClueCard
     | UseAmuletExchangeCards
     | UseAmuletRemoveSiteMarker ClueColor Int Int
     | RaiseTreasure ClueColor

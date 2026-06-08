@@ -1,6 +1,11 @@
 module Game.CursedTreasure.API
     ( getGameSetupPlayers
     , createNewGame
+    , getTurn
+    , getActivePlayer
+    , getLatestMessage
+    , getGameOver
+    , getSeed
     , enumerateActivePlayerOptions
     , makeMove
     , heuristicHint
@@ -37,7 +42,7 @@ import Lens.Micro.Platform ((%~), Lens', lens, Traversal')
 import qualified Data.Text as Text
 import Relude.Extra (bimapF, maximum1, minimum1)
 import Relude.Extra.Map (insert, keys, member, notMember, toPairs, alter)
-import System.Random (mkStdGen, uniformR, RandomGen, uniformShuffleList, splitGen, StdGen)
+import System.Random (mkStdGen, uniformR, RandomGen, uniformShuffleList)
 import qualified Data.Map.Strict as Map (elemAt, elems, empty,
     lookup, union, filter, filterWithKey, restrictKeys, withoutKeys, delete)
 import qualified Data.Set as Set (delete, difference, intersection,
@@ -85,6 +90,10 @@ import Game.Core.Primitives
     , toHourHand
     , CubeCoordinateTokens (CubeCoordinateTokens)
     , CubeCoordinate
+    , SeedStream
+    , mkSeedStream
+    , nextSeedStream
+    , seedStreamStdGen
     )
 
 -- | Builds the default player roster by pairing each legal color with a numbered player.
@@ -110,6 +119,21 @@ censorGame = censor
 createNewGame :: [PlayerDescription] -> Int -> (GameState, [CensoredGameState])
 createNewGame players randomSeed = censorGame newGameState
     where newGameState = createNewGameState players randomSeed
+
+getTurn :: GameState -> Int
+getTurn gameState = gameState.turn
+
+getActivePlayer :: GameState -> PlayerId
+getActivePlayer gameState = gameState.activePlayer
+
+getLatestMessage :: GameState -> Text
+getLatestMessage gameState = gameState.latestMessage
+
+getGameOver :: GameState -> Bool
+getGameOver gameState = gameState.gameOver
+
+getSeed :: GameState -> SeedStream
+getSeed gameState = gameState.seed
 
     -- | Initializes a player state with no cards, treasures, or remaining actions.
 createNewPlayer :: PlayerDescription -> PlayerState
@@ -723,13 +747,13 @@ createNewGameState playerDs randomSeed
                 , raisingTreasure = Nothing
                 , latestMessage = "Player \"" <> firstPlayerName <> "\" Turn"
                 , gameOver = False
-                , seed = (randomSeed, 1)
+                , seed = mkSeedStream randomSeed 1
                 }
             validColors = all ((`elem` allPlayerColors) . (\pd -> pd.playerColor)) playerDs
             newPlayers = map createNewPlayer playerDs
             firstPlayer = maybe (error "createNewGameState requires at least one player") (\(p, _) -> p.player.playerId) $ uncons newPlayers
             firstPlayerName = maybe "Missing" (\(p, _) -> p.player.playerName) $ uncons newPlayers
-            g = fst $ mkStdGenN randomSeed 0
+            g = mkStdGen randomSeed
             (randomizedClues, gT) = uniformShuffleList allClues g
             (stackedTreasure, gB) = stackTreasure gT
             board = createBoard gB
@@ -742,7 +766,7 @@ createNewGameState playerDs randomSeed
             dealCluesToPlayer n pId s = dealCluesToPlayer (n-1) pId $
                 s & messageL %~ eUpd & clueDeckL %~ deckUpd & playerL pId %~ psUpd
                 where (eUpd, deckUpd, psUpd, _) = _eitherUpdates3 $
-                        dealClueCardToPlayer (0, 0) s.clueDeck (findPlayer pId s)
+                        dealClueCardToPlayer (mkSeedStream 0 0) s.clueDeck (findPlayer pId s)
 
 -- | Converts an 'Either' update into a message updater and a value updater.
 _eitherUpdates :: Semigroup a1 => Either a1 (a2 -> a2) -> (a1 -> a1, a2 -> a2)
@@ -810,21 +834,16 @@ setPlayerTurn ps = ps   { availableJeepMoves = 3
                         , availablePickupAmulet = 1
                         , availableClueCardExchange = 1 }
 
--- | Derives a deterministic split generator at the requested depth.
-mkStdGenN :: Int -> Int -> (StdGen, StdGen)
-mkStdGenN seed 0 = splitGen $ mkStdGen seed
-mkStdGenN seed n = splitGen (snd $ mkStdGenN seed (n-1))
-
 -- | Draws one clue card for a player, reshuffling the discard pile when needed.
-dealClueCardToPlayer :: (Int, Int) -> Deck ClueCard -> Either Text PlayerState
-    -> Either Text (Deck ClueCard -> Deck ClueCard, PlayerState -> PlayerState, (Int, Int) -> (Int, Int))
+dealClueCardToPlayer :: SeedStream -> Deck ClueCard -> Either Text PlayerState
+    -> Either Text (Deck ClueCard -> Deck ClueCard, PlayerState -> PlayerState, SeedStream -> SeedStream)
 dealClueCardToPlayer _ _ (Left e) = Left e
 dealClueCardToPlayer gSeed (draw, discard) (Right pS)
     = withSeedUpd <$> bimapF toDeckUpd (cluesL %~) (moveCard Nothing id draw' pS.clues)
     where   withSeedUpd (deckUpd, pUpd) = (deckUpd, pUpd, seedUpd)
             toDeckUpd = if null draw then const . const (drop 1 randomizedClues, []) else first
-            seedUpd = if null draw then second (+1) else id
-            rG = fst $ mkStdGenN (snd gSeed) $ fst gSeed
+            seedUpd = if null draw then nextSeedStream else id
+            rG = seedStreamStdGen gSeed
             randomizedClues = fst $ uniformShuffleList discard rG
             draw' = if null draw then randomizedClues else draw
 
@@ -904,7 +923,7 @@ updateBoard gS board = case gS.terrainBoard of
     CubeCoordinateTokens o _ -> gS { terrainBoard = CubeCoordinateTokens o board}
 
 -- | Lens into the pair of deterministic RNG counters.
-seedL :: Lens' GameState (Int, Int)
+seedL :: Lens' GameState SeedStream
 seedL = lens (.seed)
     (\gameState seed -> gameState { seed = seed})
 
@@ -1233,8 +1252,8 @@ raiseTreasureShuffle :: GameState -> GameState
 raiseTreasureShuffle s =
     s & raiseTreasureL %~ (shuffleTCards <$>) & seedL %~ updSeed & raiseTreasureChooseStart
     where   cards = maybe [] (fst . (.rtTreasureChest)) s.raisingTreasure
-            updSeed = second (+1)
-            rG = fst $ mkStdGenN (snd s.seed) $ fst s.seed
+            updSeed = nextSeedStream
+            rG = seedStreamStdGen s.seed
             randomizedTreasures = fst $ uniformShuffleList cards rG
             shuffleTCards rt = rt { rtTreasureChest = (randomizedTreasures, [])}
 

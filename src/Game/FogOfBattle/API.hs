@@ -1,6 +1,11 @@
 module Game.FogOfBattle.API
     ( getGameSetupPlayers
     , createNewGame
+    , getTurn
+    , getActivePlayer
+    , getLatestMessage
+    , getGameOver
+    , getSeed
     , enumerateActivePlayerOptions
     , makeMove
     , heuristicHint
@@ -8,19 +13,39 @@ module Game.FogOfBattle.API
     )
 where
 
+import Game.Core.Primitives (PlayerId, SeedStream, mkPlayerId, mkSeedStream)
 import Game.FogOfBattle.Types
 
 getGameSetupPlayers :: [PlayerDescription]
 getGameSetupPlayers = []
 
 createNewGame :: [PlayerDescription] -> Int -> (GameState, [CensoredGameState])
-createNewGame players _ = (gameState, map (mkCensoredGameState gameState) players)
+createNewGame players randomSeed = (gameState, map (mkCensoredGameState gameState) players)
     where
+        firstPlayer = fromMaybe (error "Fog Of Battle requires at least one player") (mkPlayerId 1)
         gameState = GameState
             { players = players
             , turn = 0
+            , activePlayer = firstPlayer
+            , latestMessage = "Fog Of Battle setup complete"
             , gameOver = True
+            , seed = mkSeedStream randomSeed 1
             }
+
+getTurn :: GameState -> Int
+getTurn gameState = gameState.turn
+
+getActivePlayer :: GameState -> PlayerId
+getActivePlayer gameState = gameState.activePlayer
+
+getLatestMessage :: GameState -> Text
+getLatestMessage gameState = gameState.latestMessage
+
+getGameOver :: GameState -> Bool
+getGameOver gameState = gameState.gameOver
+
+getSeed :: GameState -> SeedStream
+getSeed gameState = gameState.seed
 
 enumerateActivePlayerOptions :: GameState -> [PlayerMove]
 enumerateActivePlayerOptions _ = []

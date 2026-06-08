@@ -79,11 +79,13 @@ propertySetDifference (PropertySet left) (PropertySet right) = PropertySet (Map.
 propertySetDelete :: Text -> PropertySet -> PropertySet
 propertySetDelete key (PropertySet properties) = PropertySet (Map.delete key properties)
 
--- In Haskell, data structures are shared, so there will be no problem just
--- keeping the PropertySet directly in the Voxel, and then when creating the view to be serialized,
--- remapping the voxels to contain a handle which can be used to look up a PropertySet.
+-- In Haskell, data structures are shared, so there will be no problem
+-- keeping the PropertySet directly in the Voxel even multiplied by millions of references, 
+-- When creating the view to be serialized, to resolve dereferencing, we will
+-- remap the layers to contain handles which can be used to look up a PropertySet.
 -- This does imply we should try to assign the same PropertySet to voxels over and over, not
--- rebuild PropertySets over and over, when possible.
+-- rebuild PropertySets over and over, when possible. To accellerate searching for logically
+-- identical Voxels, producing the view will require the PropertySetHashmap.
 
 -- Notionally, a HexVoxel is defined like the following data structure:
 -- data HexVoxel = HexVoxel {
@@ -164,17 +166,17 @@ substituteConceptGroups (PropertyGroups groups) (PropertyGroups newGroups) = map
     where   lookupGroup name = fromMaybe (PropertySet Map.empty)
                 (Map.lookup name groups <|> Map.lookup name newGroups)
 
-newtype NamedPropertyOps concept = NamedPropertyOps (Map Text [ConceptOperation concept])
+newtype NamedPropertyOps concept = NamedPropertyOps [(Text, ConceptOperation concept)]
 
 instance Semigroup (NamedPropertyOps concept) where
     NamedPropertyOps left <> NamedPropertyOps right = NamedPropertyOps 
-        $ Map.unionWith (++) left right
+        $ left ++ right
 
 instance Monoid (NamedPropertyOps concept) where
     mempty = NamedPropertyOps mempty
 
 
--- One thing we notice aobut the property groups is that because they are "global", and identified
+-- One thing we notice about the property groups is that because they are "global", and identified
 -- by the global PropertyGroupName, it is a monoid. Property groups could be "forgotten", but they
 -- cannot be destroyed. Moreover, any newly created PropertyGroup will either be brand new or
 -- exactly duplicate of another PropertyGroup.
@@ -201,11 +203,13 @@ type VoxelBlock voxelType = (FirstColumnIndex, [VoxelRow voxelType])
 -- expect to change a small fraction of the voxels. Moreover, we need to track voxel destruction,
 -- creation, update, and movement. 
 
--- Noticing that just using a full Voxel payload to represent an update places an undo burden on 
--- downstream logic to understand what changed, we can more directly leverage the way PropertySet is
--- constructed. Since PropertySet is isomorphic to a list, a single reference can identify the
--- previous unchanged state deep in the PropertySet hierarchy:
-data VoxelOption = NoVoxel | NamedVoxel Text | NewVoxel Voxel
+-- There are at least two passes over the Voxel Deltas. The VoxelOption is designed to support the 
+-- initial VoxelMutaion as the result of a ordered composition. The monoid simply preserves the
+-- ultimate from->to outcome. Obviously, either transitioning from or to nothing (NoVoxel) is an option.
+-- NamedVoxel Text links to one of the NamedConceptOps which are also serially composed.
+-- The NamedConceptOps serial composition is a composition at the property level, not the voxel level.
+-- JustVoxel is an existing Voxel, either from previous passes, or not composed via NamedConceptOps. 
+data VoxelOption = NoVoxel | NamedVoxel Text | JustVoxel Voxel
 data VoxelMutation voxelType = VoxelMutation voxelType voxelType
 
 instance Semigroup (VoxelMutation voxelType) where
@@ -217,8 +221,6 @@ instance Monoid (VoxelMutation VoxelOption) where
 instance Monoid (VoxelMutation PropertySetHandle) where
     mempty = VoxelMutation 0 0
 
--- where we note and stress that the Voxel in VoxelUpdate entails and duplicates FormerVoxel at some
--- point during unpacking the list-like PropertySet.
 -- We store the mutations sparsely:
 newtype VoxelMutations voxelType = VoxelMutations (Map QRCoord (VoxelMutation voxelType))
 
@@ -230,7 +232,7 @@ instance Monoid (VoxelMutations voxelType) where
     mempty = VoxelMutations mempty
 
 -- We also want to track movements, but if we know where the voxel moves to, then the FromQRCoord is the
--- only content
+-- only content. Swapping Voxels is the same as two VoxelMovements, one the reverse of the other.
 type FromQRCoord = QRCoord
 -- We store the movements sparsely as well:
 newtype VoxelMovements = VoxelMovements (Map QRCoord FromQRCoord)
@@ -256,35 +258,25 @@ hudPresentationLayer = 0
 -- We expect all games to have at least two layers or more, with higher numbers being displayed on top
 -- when visible. It is a sort of "logical" Z buffer. And so the "first" game layer is nominally at -1.
 -- Usually, we imagine the Player Legend, Information, and Meta-Tool HUD will be layer 0. 
--- In addition, for every layer, we define a concept called a tool. The idea is that for each layer,
--- there is _always_ a currently active tool. Even when the player "has no tool" we imagine that the
+-- In addition, for every layer, we define a concept called a tool. The idea is that a user
+-- _always_ has a currently active tool. Even when the player "has no tool" we imagine that the
 -- player has the "hand" tool equipped. Matching this concept, we dub all voxels that can be 
 -- manipulated by the tool to be valid sockets.  So for the currently equipped tool, the set of valid 
 -- sockets is exactly the set of voxels with the property ("enabled", TrueProperty).
--- We take it as an architectural choice that _removing_ the enabled property is tracked by 
--- voxelMutateAfter, and _adding_ the enabled property is tracked by voxelMutateAfter. The
--- corresponding loss of generalization is not much, since selecting a tool is normally the only
--- way voxels are enabled or disabled, and applying a tool to a socket is normally the only way
--- voxels are moved or heavily modified.
 -- Now since the PropertySet is already a nicely expressive way to represent an arbitrary
 -- complex of properties, and since the tools will almost always be a result of the "hand" tool picking
 -- up a "tool" voxel in the GUI HUD, we will leverage the same data structure:
 type SelectedTool = PropertySetHandle
 
--- Now a view of Voxels themselves should be sufficiently represented by a VoxelLayerView.
--- We call this a view because there is no expectation that it is the complete set of Voxel Data.
--- However, it _should_ be a complete description of the currently "visible" voxels in the layer AND 
+-- Now a given game rule set should be sufficiently represented by a VoxelVerseState and a VoxelVerseDelta.
+-- This _should_ be a complete description of the state of the voxels in each layer AND 
 -- describe how the layer changed compared to the layer state from the previous GameState before 
 -- the latest move.
--- Therefore, this VoxelLayerView contains a sequence of modifications to the voxels that resulted in the
+-- Therefore, this VoxelLayerDelta contains a sequence of modifications to the voxels that resulted in the
 -- current voxels, namely: 
 -- * voxelMutateBefore occured first, which updated the voxel properties before any voxels moved,
 -- * then voxelMove, which tracks where each moved voxel came from and went to
 -- * and last voxelMutateAfter, which updated the voxel properties after any voxels moved (and/or mutated).  
--- We also need to track when the moves and mutations are unconfirmed or finalized, and so if a 
--- player action is planned/unconfirmed, the finalized flag will be false. We assume here that compound 
--- move planning will be displayed in the GUI using something like a ghost or high-lighted frame, and that
--- representing the entire planning outcome as one before-move-after mutation step will be adequate.
 data VoxelLayerDelta = VoxelLayerDelta {
     voxelMutateBefore :: VoxelMutations VoxelOption,
     voxelMove :: VoxelMovements,
@@ -316,6 +308,7 @@ data VoxelLayerState = VoxelLayerState {
 data VoxelVerseState playerType = VoxelVerseState {
     propertyGroups :: PropertyGroups,
     activePlayer :: playerType,
+    viewingPlayer :: playerType,
     playerSequence :: [playerType],
     voxelLayers :: [VoxelLayerState]
 }
@@ -355,10 +348,11 @@ data ToolApplication = ToolApplication {
 -- It is also important for large Game Universes, to be able for downstream logic to specify an 
 -- optional "orthographic" viewport to enable focusing, limiting, and even zooming in or out of the game world.
 -- However, since every game could define view ports differently, and definitely define zooming
--- differently, we will _also_ define the viewport with the idea of a tool in mind. This also enables
+-- differently, we would naturally define the viewport as the result of applying a tool. This also enables
 -- lenses and transparency layers if some games need those features.
 -- Having said all that, our ViewPort data structure would be:
 -- data ViewPort = ViewPort {
+--     viewportLayer :: Int,
 --     viewportTool :: SelectedTool,
 --     viewportSelection :: ToolSelection
 -- }
@@ -390,6 +384,7 @@ data VoxelVerseView playerType = VoxelVerseView
     { propertyGroups :: PropertyGroups
     , propertySets :: PropertySets
     , activePlayer :: playerType
+    , playerId :: Int
     , playerSequence :: [playerType]
     , toolApplication :: ToolApplication
     , voxelLayers :: [VoxelLayerView]

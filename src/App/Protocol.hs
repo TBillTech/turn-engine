@@ -6,6 +6,7 @@ where
 
 import Data.Aeson
     ( FromJSON (parseJSON)
+    , Object
     , ToJSON (toJSON, toEncoding)
     , Value
     , object
@@ -16,6 +17,7 @@ import Data.Aeson
     )
 import Data.Aeson.Types (Parser)
 
+import qualified Game.Core.API as CoreAPI
 import qualified Game.Core.Types as Core
 
 data ServiceRequest
@@ -32,21 +34,28 @@ instance FromJSON ServiceRequest where
         requestType <- request .: "request" :: Parser Text
         case requestType of
             "getGameSetupPlayers" -> pure GetGameSetupPlayers
-            "createNewGame" -> CreateNewGame
-                <$> request .: "players"
-                <*> request .: "randomSeed"
+            "createNewGame" -> do
+                players <- request .: "players"
+                randomSeed <- request .: "randomSeed"
+                _ <- either (fail . toString) pure (CoreAPI.validateSetupPlayers players)
+                pure (CreateNewGame players randomSeed)
             "enumerateActivePlayerOptions" -> EnumerateActivePlayerOptions
-                <$> request .: "gameState"
+                <$> parseValidatedGameState request
             "makeMove" -> MakeMove
-                <$> request .: "gameState"
+                <$> parseValidatedGameState request
                 <*> request .: "playerMove"
             "heuristicHint" -> HeuristicHint
                 <$> request .: "level"
-                <*> request .: "gameState"
+                <*> parseValidatedGameState request
                 <*> request .: "playerMoves"
             "summary" -> Summary
-                <$> request .: "gameState"
+                <$> parseValidatedGameState request
             _ -> fail ("Unsupported service request type: " <> toString requestType)
+
+parseValidatedGameState :: Object -> Parser Core.GameState
+parseValidatedGameState request = do
+    gameState <- request .: "gameState"
+    either (fail . toString) pure (CoreAPI.validateGameState gameState)
 
 instance ToJSON ServiceRequest where
     toJSON = \case

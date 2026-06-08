@@ -1,6 +1,10 @@
 {-# LANGUAGE DerivingStrategies #-}
 module Game.Core.Primitives
-    ( GameColor (..)
+    ( PlayerId
+    , mkPlayerId
+    , unPlayerId
+    , allPlayerIds
+    , GameColor (..)
     , ToGameColor (..)
     , allGameColors
     , HourHand
@@ -18,11 +22,39 @@ module Game.Core.Primitives
     , toXYScaledOrientation
     , radiusOneCubeCoordinates
     , radiusTwoCubeCoordinates
+    , SeedStream (..)
+    , mkSeedStream
+    , seedStreamStdGen
+    , nextSeedStream
     )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=), object, withObject)
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=), object, withObject, withScientific)
 import qualified Data.Map.Strict as Map
+import System.Random (StdGen, mkStdGen)
+
+newtype PlayerId = PlayerId Int
+    deriving stock (Show, Eq, Ord, Generic)
+
+mkPlayerId :: Int -> Maybe PlayerId
+mkPlayerId playerId
+    | playerId >= 1 = Just (PlayerId playerId)
+    | otherwise = Nothing
+
+unPlayerId :: PlayerId -> Int
+unPlayerId (PlayerId playerId) = playerId
+
+allPlayerIds :: [PlayerId]
+allPlayerIds = mapMaybe mkPlayerId [1 ..]
+
+instance FromJSON PlayerId where
+    parseJSON = withScientific "PlayerId" $ \value ->
+        case mkPlayerId (round value) of
+            Just playerId | fromIntegral (unPlayerId playerId) == value -> pure playerId
+            _ -> fail "PlayerId must be a positive integer"
+
+instance ToJSON PlayerId where
+    toJSON = toJSON . unPlayerId
 
 data GameColor = White
     | LightRed | Red | DarkRed
@@ -208,3 +240,32 @@ isUnitCubeDist (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) =
     dq*dq + dq*dr + dr*dr == 1
     where   dq = q_a - q_b
             dr = r_a - r_b
+
+-- | Serializable RNG state represented as (base seed, stream index).
+data SeedStream = SeedStream
+    { seedBase :: Int
+    , seedIndex :: Int
+    }
+    deriving stock (Show, Eq, Generic)
+
+instance ToJSON SeedStream where
+    toJSON (SeedStream base index) = toJSON (base, index)
+
+instance FromJSON SeedStream where
+    parseJSON value = do
+        (base, index) <- parseJSON value
+        pure (SeedStream base index)
+
+mkSeedStream :: Int -> Int -> SeedStream
+mkSeedStream = SeedStream
+
+nextSeedStream :: SeedStream -> SeedStream
+nextSeedStream (SeedStream base index) = SeedStream base (index + 1)
+
+-- | Derives a deterministic generator in O(1) from the serialized RNG stream state.
+seedStreamStdGen :: SeedStream -> StdGen
+seedStreamStdGen (SeedStream base index) = mkStdGen mixed
+    where
+        mixed = fromInteger ((a * 6364136223846793005 + b * 1442695040888963407 + 11400714819323198485) `mod` 2147483647)
+        a = toInteger base
+        b = toInteger index

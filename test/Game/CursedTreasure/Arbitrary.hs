@@ -5,6 +5,7 @@ module Game.CursedTreasure.Arbitrary () where
 import Test.QuickCheck
 
 import Game.Arbitrary ()
+import Game.Core.Primitives (SeedStream, mkSeedStream)
 import Game.CursedTreasure.Types
     ( ClueCard (..)
     , ClueColor
@@ -23,8 +24,8 @@ import Game.CursedTreasure.Types
     , TerrainHex (..)
     , TerrainToken (..)
     , TreasureCard (..)
+    , allowedPlayerIds
     , allClueColors
-    , allPlayerIds
     , allPlayerColors
     , allFeatures
     , mkCensoredGameState
@@ -37,7 +38,7 @@ instance Arbitrary ClueColor where
     arbitrary = elements allClueColors
 
 instance Arbitrary PlayerId where
-    arbitrary = elements allPlayerIds
+    arbitrary = elements allowedPlayerIds
 
 instance Arbitrary Feature where
     arbitrary = elements allFeatures
@@ -121,6 +122,11 @@ instance Arbitrary RaisingTreasureState where
             <*> arbitrary
       where
         smallNonNegative = getNonNegative <$> (arbitrary :: Gen (NonNegative Int))
+
+instance Arbitrary SeedStream where
+        arbitrary = mkSeedStream <$> arbitrary <*> smallNonNegative
+            where
+                smallNonNegative = getNonNegative <$> (arbitrary :: Gen (NonNegative Int))
 
 instance Arbitrary GameState where
     arbitrary =

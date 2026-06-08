@@ -47,6 +47,7 @@ import Game.Core.Primitives
     , GameColor (Black)
     , isUnitCubeDist
     , mkCubeCoordinate
+    , mkSeedStream
     , radiusOneCubeCoordinates
     , radiusTwoCubeCoordinates
     , toHourHand
@@ -108,10 +109,11 @@ import Game.CursedTreasure.Types
     , TreasureCard (..)
     , TreasureBoard
     , allClueColors
+    , validatePlayerIdForRuleset
     , censorRaisingTreasure
     , mkClueColor
-    , mkPlayerId
     )
+import Game.Core.Primitives (mkPlayerId)
 
 spec :: Spec
 spec = do
@@ -304,9 +306,9 @@ spec = do
         it "keeps same-feature territories separated on board #4" $ do
             sameFeatureTerritoriesSeparated cannedBoard4 `shouldBe` True
 
-    describe "mkPlayerId" $ do
+    describe "validatePlayerIdForRuleset" $ do
         it "accepts only player ids from 1 through 4" $ do
-            map mkPlayerId [0 .. 5]
+            map (>>= either (const Nothing) Just . validatePlayerIdForRuleset) (map mkPlayerId [0 .. 5])
                 `shouldBe`
                 [ Nothing
                 , mkPlayerId 1
@@ -1305,7 +1307,7 @@ spec = do
                 length (playerStateById secondPlayerId finalState).foundTreasures `shouldBe` 0
                 gameActivePlayer finalState `shouldBe` secondPlayerId
                 raisingTreasureOrder (getRaisingTreasureState finalState) `shouldBe` [secondPlayerId]
-                raisingTreasureChest (getRaisingTreasureState finalState) `shouldBe` ([Treasure 2], [Treasure 2])
+                raisingTreasureChest (getRaisingTreasureState finalState) `shouldBe` ([Treasure 4], [Treasure 3])
 
                 resolvedState <- applyLegalMove secondPlayerId RaisingTreasureTake finalState
                 gameRaisingTreasure resolvedState `shouldBe` Nothing
@@ -2009,7 +2011,7 @@ spec = do
                         , counterexample "raising treasure chest must be hidden"
                             (maybe True raisingTreasureHidden censoredState.raisingTreasure)
                         , counterexample "seed must be cleared"
-                            (censoredState.seed == (0, 0))
+                            (censoredState.seed == mkSeedStream 0 0)
                         ]
 
 truncateCensoredFields :: PlayerId -> GameState -> GameState
@@ -2019,7 +2021,7 @@ truncateCensoredFields viewerId gameState =
         , clueDeck = ([], snd gameState.clueDeck)
         , treasureDeck = ([], snd gameState.treasureDeck)
         , raisingTreasure = truncateRaisingTreasure <$> gameState.raisingTreasure
-        , seed = (0, 0)
+        , seed = mkSeedStream 0 0
         }
   where
     truncateOther viewId playerState

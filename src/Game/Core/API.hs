@@ -1,6 +1,13 @@
 module Game.Core.API
     ( getGameSetupPlayers
+    , validateSetupPlayers
+    , validateGameState
     , createNewGame
+    , getTurn
+    , getActivePlayer
+    , getLatestMessage
+    , getGameOver
+    , getSeed
     , enumerateActivePlayerOptions
     , makeMove
     , heuristicHint
@@ -28,44 +35,100 @@ getGameSetupPlayers =
 
 createNewGame :: [Core.PlayerDescription] -> Int -> Either Text (Core.GameState, [Core.CensoredGameState])
 createNewGame players randomSeed =
+    validateSetupPlayers players >>
+        case players of
+            [] -> Left "PlayerDescription list must be non-empty and all match the same ruleset."
+            (Core.CursedTreasurePlayerDescription _ : _) ->
+                let (gameState, censoredStates) =
+                        CursedTreasure.createNewGame (expectPlayers unwrapCursedTreasure players) randomSeed
+                 in Right
+                        ( Core.CursedTreasureGame gameState
+                        , map Core.CursedTreasureCensoredGameState censoredStates
+                        )
+            (Core.FogOfBattlePlayerDescription _ : _) ->
+                let (gameState, censoredStates) =
+                        FogOfBattle.createNewGame (expectPlayers unwrapFogOfBattle players) randomSeed
+                 in Right
+                        ( Core.FogOfBattleGame gameState
+                        , map Core.FogOfBattleCensoredGameState censoredStates
+                        )
+            (Core.ArtOfWarPlayerDescription _ : _) ->
+                let (gameState, censoredStates) =
+                        ArtOfWar.createNewGame (expectPlayers unwrapArtOfWar players) randomSeed
+                 in Right
+                        ( Core.ArtOfWarGame gameState
+                        , map Core.ArtOfWarCensoredGameState censoredStates
+                        )
+            (Core.RealEstatePlayerDescription _ : _) ->
+                let (gameState, censoredStates) =
+                        RealEstate.createNewGame (expectPlayers unwrapRealEstate players) randomSeed
+                 in Right
+                        ( Core.RealEstateGame gameState
+                        , map Core.RealEstateCensoredGameState censoredStates
+                        )
+
+validateSetupPlayers :: [Core.PlayerDescription] -> Either Text [Core.PlayerDescription]
+validateSetupPlayers players =
     case players of
         [] -> Left "PlayerDescription list must be non-empty and all match the same ruleset."
         (Core.CursedTreasurePlayerDescription _ : _)
             | all isCursedTreasurePlayer players ->
-            let (gameState, censoredStates) =
-                    CursedTreasure.createNewGame (expectPlayers unwrapCursedTreasure players) randomSeed
-             in Right
-                    ( Core.CursedTreasureGame gameState
-                    , map Core.CursedTreasureCensoredGameState censoredStates
-                    )
+                map Core.CursedTreasurePlayerDescription <$> CursedTreasure.validateSetupPlayers (expectPlayers unwrapCursedTreasure players)
             | otherwise -> Left "PlayerDescription values must all match the same ruleset."
         (Core.FogOfBattlePlayerDescription _ : _)
             | all isFogOfBattlePlayer players ->
-            let (gameState, censoredStates) =
-                    FogOfBattle.createNewGame (expectPlayers unwrapFogOfBattle players) randomSeed
-             in Right
-                    ( Core.FogOfBattleGame gameState
-                    , map Core.FogOfBattleCensoredGameState censoredStates
-                    )
+                map Core.FogOfBattlePlayerDescription <$> FogOfBattle.validateSetupPlayers (expectPlayers unwrapFogOfBattle players)
             | otherwise -> Left "PlayerDescription values must all match the same ruleset."
         (Core.ArtOfWarPlayerDescription _ : _)
             | all isArtOfWarPlayer players ->
-            let (gameState, censoredStates) =
-                    ArtOfWar.createNewGame (expectPlayers unwrapArtOfWar players) randomSeed
-             in Right
-                    ( Core.ArtOfWarGame gameState
-                    , map Core.ArtOfWarCensoredGameState censoredStates
-                    )
+                map Core.ArtOfWarPlayerDescription <$> ArtOfWar.validateSetupPlayers (expectPlayers unwrapArtOfWar players)
             | otherwise -> Left "PlayerDescription values must all match the same ruleset."
         (Core.RealEstatePlayerDescription _ : _)
             | all isRealEstatePlayer players ->
-            let (gameState, censoredStates) =
-                    RealEstate.createNewGame (expectPlayers unwrapRealEstate players) randomSeed
-             in Right
-                    ( Core.RealEstateGame gameState
-                    , map Core.RealEstateCensoredGameState censoredStates
-                    )
+                map Core.RealEstatePlayerDescription <$> RealEstate.validateSetupPlayers (expectPlayers unwrapRealEstate players)
             | otherwise -> Left "PlayerDescription values must all match the same ruleset."
+
+validateGameState :: Core.GameState -> Either Text Core.GameState
+validateGameState = \case
+    Core.CursedTreasureGame gameState -> Core.CursedTreasureGame <$> CursedTreasure.validateGameState gameState
+    Core.FogOfBattleGame gameState -> Core.FogOfBattleGame <$> FogOfBattle.validateGameState gameState
+    Core.ArtOfWarGame gameState -> Core.ArtOfWarGame <$> ArtOfWar.validateGameState gameState
+    Core.RealEstateGame gameState -> Core.RealEstateGame <$> RealEstate.validateGameState gameState
+
+getTurn :: Core.GameState -> Int
+getTurn = \case
+    Core.CursedTreasureGame gameState -> CursedTreasure.getTurn gameState
+    Core.FogOfBattleGame gameState -> FogOfBattle.getTurn gameState
+    Core.ArtOfWarGame gameState -> ArtOfWar.getTurn gameState
+    Core.RealEstateGame gameState -> RealEstate.getTurn gameState
+
+getActivePlayer :: Core.GameState -> Core.PlayerId
+getActivePlayer = \case
+    Core.CursedTreasureGame gameState -> CursedTreasure.getActivePlayer gameState
+    Core.FogOfBattleGame gameState -> FogOfBattle.getActivePlayer gameState
+    Core.ArtOfWarGame gameState -> ArtOfWar.getActivePlayer gameState
+    Core.RealEstateGame gameState -> RealEstate.getActivePlayer gameState
+
+getLatestMessage :: Core.GameState -> Text
+getLatestMessage = \case
+    Core.CursedTreasureGame gameState -> CursedTreasure.getLatestMessage gameState
+    Core.FogOfBattleGame gameState -> FogOfBattle.getLatestMessage gameState
+    Core.ArtOfWarGame gameState -> ArtOfWar.getLatestMessage gameState
+    Core.RealEstateGame gameState -> RealEstate.getLatestMessage gameState
+
+getGameOver :: Core.GameState -> Bool
+getGameOver = \case
+    Core.CursedTreasureGame gameState -> CursedTreasure.getGameOver gameState
+    Core.FogOfBattleGame gameState -> FogOfBattle.getGameOver gameState
+    Core.ArtOfWarGame gameState -> ArtOfWar.getGameOver gameState
+    Core.RealEstateGame gameState -> RealEstate.getGameOver gameState
+
+getSeed :: Core.GameState -> Core.SeedStream
+getSeed = \case
+    Core.CursedTreasureGame gameState -> CursedTreasure.getSeed gameState
+    Core.FogOfBattleGame gameState -> FogOfBattle.getSeed gameState
+    Core.ArtOfWarGame gameState -> ArtOfWar.getSeed gameState
+    Core.RealEstateGame gameState -> RealEstate.getSeed gameState
 
 enumerateActivePlayerOptions :: Core.GameState -> [Core.PlayerMove]
 enumerateActivePlayerOptions = \case

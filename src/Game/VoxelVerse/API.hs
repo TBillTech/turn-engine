@@ -49,9 +49,27 @@ getGameSetupPlayers = CoreAPI.getGameSetupPlayers
 
 -- But the createNewGame talks the VoxelVerse language (and also tracks the underlying GameState).
 -- From the standpoint of downstream logic, the GameState is opaque, but needs to be tracked.
-createNewGame :: [Core.PlayerDescription] -> Int 
+createNewGame :: [Core.PlayerDescription] -> Int
     -> Either Text (VoxelVerseSession, VoxelVerseView Core.PlayerDescription)
-createNewGame players randomSeed = undefined
+createNewGame players randomSeed = do
+  createdGame <- CoreAPI.createNewGame players randomSeed
+  session <- initializeSession createdGame
+  pure (session, createVoxelVerseUpdate session)
+  where
+    initializeSession :: (Core.GameState, [Core.CensoredGameState]) -> Either Text VoxelVerseSession
+    initializeSession (gameState, censoredStates) = do
+      censoredState <- maybe (Left "VoxelVerse.createNewGame requires at least one player view") Right (viaNonEmpty head censoredStates)
+      pure VoxelVerseSession
+        { vvContext = VoxelVerseContext
+          { previousCommittedState = Nothing
+          , currentState = (gameState, censoredState)
+          , planningState = Nothing
+          }
+        , vvModel = initialVoxelVerseState censoredState
+        , vvModelDelta = initialVoxelVerseDelta censoredState
+        , vvInteractionState = initialInteractionState censoredState
+        , vvProjectionState = initialProjectionState censoredState
+        }
 
 -- enumerateActivePlayerOptions is now _entailed_ in the enabled property of the Voxels,
 -- and so does _not_ appear on this API.
@@ -67,34 +85,44 @@ createNewGame players randomSeed = undefined
 summary :: Core.GameState -> Text
 summary = CoreAPI.summary
 
-initialInteractionState :: Core.GameState -> VoxelVerseInteractionState
+initialVoxelVerseState :: Core.CensoredGameState -> VoxelVerseState Core.PlayerDescription
+initialVoxelVerseState gameState = undefined
+
+initialVoxelVerseDelta :: Core.CensoredGameState -> VoxelVerseDelta
+initialVoxelVerseDelta gameState = undefined 
+
+initialInteractionState :: Core.CensoredGameState -> VoxelVerseInteractionState
 initialInteractionState gameState =
   case gameState of
-    Core.CursedTreasureGame _ ->
+    Core.CursedTreasureCensoredGameState _ ->
       CursedTreasureVoxelVerseInteractionState CursedTreasure.initialInteractionState
-    Core.FogOfBattleGame _ ->
+    Core.FogOfBattleCensoredGameState _ ->
       FogOfBattleVoxelVerseInteractionState FogOfBattle.initialInteractionState
-    Core.ArtOfWarGame _ ->
+    Core.ArtOfWarCensoredGameState _ ->
       ArtOfWarVoxelVerseInteractionState ArtOfWar.initialInteractionState
-    Core.RealEstateGame _ ->
+    Core.RealEstateCensoredGameState _ ->
       RealEstateVoxelVerseInteractionState RealEstate.initialInteractionState
 
-initialProjectionState :: Core.GameState -> VoxelVerseProjectionState
+initialProjectionState :: Core.CensoredGameState -> VoxelVerseProjectionState
 initialProjectionState gameState =
   case gameState of
-    Core.CursedTreasureGame _ ->
+    Core.CursedTreasureCensoredGameState _ ->
       CursedTreasureVoxelVerseProjectionState CursedTreasure.initialProjectionState
-    Core.FogOfBattleGame _ ->
+    Core.FogOfBattleCensoredGameState _ ->
       FogOfBattleVoxelVerseProjectionState FogOfBattle.initialProjectionState
-    Core.ArtOfWarGame _ ->
+    Core.ArtOfWarCensoredGameState _ ->
       ArtOfWarVoxelVerseProjectionState ArtOfWar.initialProjectionState
-    Core.RealEstateGame _ ->
+    Core.RealEstateCensoredGameState _ ->
       RealEstateVoxelVerseProjectionState RealEstate.initialProjectionState
 
+-- Generally speaking, the unrestricted Core.GameState needs to be preserved and kept for future
+-- calls to the underlying API, and for correct GameState computations. It may also be necessary to
+-- revert to a previously committed state, so we need a copy of a previous state for that purpose.
+-- Otherwise, the logic at the VoxelVerse level should be consistently using a CensoredGameState. 
 data VoxelVerseContext = VoxelVerseContext
-    { previousCommittedState :: Maybe Core.GameState
-    , currentState :: Core.GameState
-    , planningState :: Maybe Core.GameState 
+    { previousCommittedState :: Maybe (Core.GameState, Core.CensoredGameState)
+    , currentState :: (Core.GameState, Core.CensoredGameState)
+    , planningState :: Maybe Core.CensoredGameState
     }
 
 data VoxelVerseSession = VoxelVerseSession
@@ -105,7 +133,7 @@ data VoxelVerseSession = VoxelVerseSession
     , vvProjectionState :: VoxelVerseProjectionState
     }
 
-data SessionState = SessionState 
+data SessionState = SessionState
     {
       voxelVerseState :: VoxelVerseState Core.PlayerDescription
     , voxelVerseInteractionState :: VoxelVerseInteractionState
@@ -117,7 +145,7 @@ type SessionM a = RWST VoxelVerseContext VoxelVerseDelta SessionState (Either Te
 -- applyTool is the more generic and high level mutation of the GameState which _entails_ makeMove 
 -- AND enumerateActivePlayerOptions AND hueristicHint. It even entails ViewPorts, since a ViewPort
 -- turns out to be simply another kind of Tool Application.
-applyTool :: VoxelVerseSession -> ToolApplication 
+applyTool :: VoxelVerseSession -> ToolApplication
   -> Either Text (VoxelVerseSession, VoxelVerseView Core.PlayerDescription)
 applyTool session toolApplication =
     case runRWST (applyToolM toolApplication) session.vvContext sessionState of
@@ -141,7 +169,7 @@ applyTool session toolApplication =
     createView sess = (sess, createVoxelVerseUpdate sess)
 
 createVoxelVerseUpdate :: VoxelVerseSession -> VoxelVerseView Core.PlayerDescription
-createVoxelVerseUpdate = undefined
+createVoxelVerseUpdate sess = undefined
 
 applyToolM :: ToolApplication -> SessionM VoxelVerseContext
 applyToolM _toolApplication = do

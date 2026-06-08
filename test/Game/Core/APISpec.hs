@@ -22,6 +22,22 @@ spec = do
             Core.createNewGame [] 0
                 `shouldBe` Left "PlayerDescription list must be non-empty and all match the same ruleset."
 
+        it "rejects Cursed Treasure players outside the ruleset player id range" $ do
+            let invalidPlayer =
+                    CursedTreasure.PlayerDescription
+                        { CursedTreasure.playerId = fromMaybe (error "expected positive PlayerId") (mkPlayerId 5)
+                        , CursedTreasure.playerName = "Player 5"
+                        , CursedTreasure.playerAI = "Unassigned"
+                        , CursedTreasure.playerColor = CursedTreasure.PlayerColor Red
+                        }
+                validPlayer =
+                    case CursedTreasure.getGameSetupPlayers of
+                        player : _ -> player
+                        [] -> error "expected Cursed Treasure setup player"
+
+            Core.createNewGame [CursedTreasurePlayerDescription validPlayer, CursedTreasurePlayerDescription invalidPlayer] 0
+                `shouldBe` Left "Cursed Treasure playerId must be an integer from 1 to 4"
+
         it "rejects mixed player description rulesets" $ do
             let cursedTreasurePlayer =
                     case CursedTreasure.getGameSetupPlayers of
