@@ -66,6 +66,7 @@ import Game.CursedTreasure.Types
     , PlayerMove
     , TerrainHex (..)
     , allPlayerColors
+    , mkPlayerColor
     , allClueColors
     , Score (..)
     , HexMap
@@ -82,6 +83,7 @@ import Game.CursedTreasure.Types
 import Game.Core.Primitives
     ( adjacentCubeCoordinates
     , FromHourHand (..)
+    , ToGameColor (..)
     , mkCubeCoordinate
     , cubeCoordinateDistance
     , cubeCoordinateDistFloor
@@ -98,11 +100,12 @@ import Game.Core.Primitives
 
 -- | Builds the default player roster by pairing each legal color with a numbered player.
 getGameSetupPlayers :: [PlayerDescription]
-getGameSetupPlayers = zipWith mkPlayerDescription allPlayerIds allPlayerColors
+getGameSetupPlayers = zipWith mkPlayerDescription allPlayerIds (map toGameColor allPlayerColors)
     where
         mkPlayerDescription playerId c =
             PlayerDescription
-                { playerId = playerId
+                { playerRuleset = "Cursed Treasure"
+                , playerId = playerId
                 , playerName = "Player " <> show playerId
                 , playerAI = "Unassigned"
                 , playerColor = c
@@ -749,7 +752,7 @@ createNewGameState playerDs randomSeed
                 , gameOver = False
                 , seed = mkSeedStream randomSeed 1
                 }
-            validColors = all ((`elem` allPlayerColors) . (\pd -> pd.playerColor)) playerDs
+            validColors = all (isJust . mkPlayerColor . (\pd -> pd.playerColor)) playerDs
             newPlayers = map createNewPlayer playerDs
             firstPlayer = maybe (error "createNewGameState requires at least one player") (\(p, _) -> p.player.playerId) $ uncons newPlayers
             firstPlayerName = maybe "Missing" (\(p, _) -> p.player.playerName) $ uncons newPlayers

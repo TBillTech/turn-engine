@@ -27,10 +27,10 @@ import qualified Game.RealEstate.Types as RealEstate
 
 getGameSetupPlayers :: [(Text, [Core.PlayerDescription])]
 getGameSetupPlayers =
-    [ ("Cursed Treasure", map Core.CursedTreasurePlayerDescription CursedTreasure.getGameSetupPlayers)
-    , ("Fog Of Battle", map Core.FogOfBattlePlayerDescription FogOfBattle.getGameSetupPlayers)
-    , ("Art Of War", map Core.ArtOfWarPlayerDescription ArtOfWar.getGameSetupPlayers)
-    , ("Real Estate", map Core.RealEstatePlayerDescription RealEstate.getGameSetupPlayers)
+    [ ("Cursed Treasure", CursedTreasure.getGameSetupPlayers)
+    , ("Fog Of Battle", FogOfBattle.getGameSetupPlayers)
+    , ("Art Of War", ArtOfWar.getGameSetupPlayers)
+    , ("Real Estate", RealEstate.getGameSetupPlayers)
     ]
 
 createNewGame :: [Core.PlayerDescription] -> Int -> Either Text (Core.GameState, [Core.CensoredGameState])
@@ -38,54 +38,50 @@ createNewGame players randomSeed =
     validateSetupPlayers players >>
         case players of
             [] -> Left "PlayerDescription list must be non-empty and all match the same ruleset."
-            (Core.CursedTreasurePlayerDescription _ : _) ->
-                let (gameState, censoredStates) =
-                        CursedTreasure.createNewGame (expectPlayers unwrapCursedTreasure players) randomSeed
-                 in Right
-                        ( Core.CursedTreasureGame gameState
-                        , map Core.CursedTreasureCensoredGameState censoredStates
-                        )
-            (Core.FogOfBattlePlayerDescription _ : _) ->
-                let (gameState, censoredStates) =
-                        FogOfBattle.createNewGame (expectPlayers unwrapFogOfBattle players) randomSeed
-                 in Right
-                        ( Core.FogOfBattleGame gameState
-                        , map Core.FogOfBattleCensoredGameState censoredStates
-                        )
-            (Core.ArtOfWarPlayerDescription _ : _) ->
-                let (gameState, censoredStates) =
-                        ArtOfWar.createNewGame (expectPlayers unwrapArtOfWar players) randomSeed
-                 in Right
-                        ( Core.ArtOfWarGame gameState
-                        , map Core.ArtOfWarCensoredGameState censoredStates
-                        )
-            (Core.RealEstatePlayerDescription _ : _) ->
-                let (gameState, censoredStates) =
-                        RealEstate.createNewGame (expectPlayers unwrapRealEstate players) randomSeed
-                 in Right
-                        ( Core.RealEstateGame gameState
-                        , map Core.RealEstateCensoredGameState censoredStates
-                        )
+            firstPlayer : _ ->
+                case firstPlayer.playerRuleset of
+                    "Cursed Treasure" ->
+                        let (gameState, censoredStates) =
+                                CursedTreasure.createNewGame players randomSeed
+                         in Right
+                                ( Core.CursedTreasureGame gameState
+                                , map Core.CursedTreasureCensoredGameState censoredStates
+                                )
+                    "Fog Of Battle" ->
+                        let (gameState, censoredStates) =
+                                FogOfBattle.createNewGame players randomSeed
+                         in Right
+                                ( Core.FogOfBattleGame gameState
+                                , map Core.FogOfBattleCensoredGameState censoredStates
+                                )
+                    "Art Of War" ->
+                        let (gameState, censoredStates) =
+                                ArtOfWar.createNewGame players randomSeed
+                         in Right
+                                ( Core.ArtOfWarGame gameState
+                                , map Core.ArtOfWarCensoredGameState censoredStates
+                                )
+                    "Real Estate" ->
+                        let (gameState, censoredStates) =
+                                RealEstate.createNewGame players randomSeed
+                         in Right
+                                ( Core.RealEstateGame gameState
+                                , map Core.RealEstateCensoredGameState censoredStates
+                                )
+                    _ -> Left "Unsupported ruleset in PlayerDescription"
 
 validateSetupPlayers :: [Core.PlayerDescription] -> Either Text [Core.PlayerDescription]
 validateSetupPlayers players =
     case players of
         [] -> Left "PlayerDescription list must be non-empty and all match the same ruleset."
-        (Core.CursedTreasurePlayerDescription _ : _)
-            | all isCursedTreasurePlayer players ->
-                map Core.CursedTreasurePlayerDescription <$> CursedTreasure.validateSetupPlayers (expectPlayers unwrapCursedTreasure players)
-            | otherwise -> Left "PlayerDescription values must all match the same ruleset."
-        (Core.FogOfBattlePlayerDescription _ : _)
-            | all isFogOfBattlePlayer players ->
-                map Core.FogOfBattlePlayerDescription <$> FogOfBattle.validateSetupPlayers (expectPlayers unwrapFogOfBattle players)
-            | otherwise -> Left "PlayerDescription values must all match the same ruleset."
-        (Core.ArtOfWarPlayerDescription _ : _)
-            | all isArtOfWarPlayer players ->
-                map Core.ArtOfWarPlayerDescription <$> ArtOfWar.validateSetupPlayers (expectPlayers unwrapArtOfWar players)
-            | otherwise -> Left "PlayerDescription values must all match the same ruleset."
-        (Core.RealEstatePlayerDescription _ : _)
-            | all isRealEstatePlayer players ->
-                map Core.RealEstatePlayerDescription <$> RealEstate.validateSetupPlayers (expectPlayers unwrapRealEstate players)
+        firstPlayer : _
+            | all ((== firstPlayer.playerRuleset) . (.playerRuleset)) players ->
+                case firstPlayer.playerRuleset of
+                    "Cursed Treasure" -> CursedTreasure.validateSetupPlayers players
+                    "Fog Of Battle" -> FogOfBattle.validateSetupPlayers players
+                    "Art Of War" -> ArtOfWar.validateSetupPlayers players
+                    "Real Estate" -> RealEstate.validateSetupPlayers players
+                    _ -> Left "Unsupported ruleset in PlayerDescription"
             | otherwise -> Left "PlayerDescription values must all match the same ruleset."
 
 validateGameState :: Core.GameState -> Either Text Core.GameState
@@ -189,53 +185,6 @@ makeMove gameState playerMove =
                 , map Core.RealEstateCensoredGameState censoredStates
                 )
         _ -> error "PlayerMove does not match GameState ruleset."
-
-expectPlayers :: (Core.PlayerDescription -> Maybe playerDescription) -> [Core.PlayerDescription] -> [playerDescription]
-expectPlayers unwrap players
-    | length unwrappedPlayers == length players = unwrappedPlayers
-    | otherwise = error "PlayerDescription values must all match the selected ruleset."
-    where
-        unwrappedPlayers = mapMaybe unwrap players
-
-isCursedTreasurePlayer :: Core.PlayerDescription -> Bool
-isCursedTreasurePlayer = \case
-    Core.CursedTreasurePlayerDescription _ -> True
-    _ -> False
-
-isFogOfBattlePlayer :: Core.PlayerDescription -> Bool
-isFogOfBattlePlayer = \case
-    Core.FogOfBattlePlayerDescription _ -> True
-    _ -> False
-
-isArtOfWarPlayer :: Core.PlayerDescription -> Bool
-isArtOfWarPlayer = \case
-    Core.ArtOfWarPlayerDescription _ -> True
-    _ -> False
-
-isRealEstatePlayer :: Core.PlayerDescription -> Bool
-isRealEstatePlayer = \case
-    Core.RealEstatePlayerDescription _ -> True
-    _ -> False
-
-unwrapCursedTreasure :: Core.PlayerDescription -> Maybe CursedTreasure.PlayerDescription
-unwrapCursedTreasure = \case
-    Core.CursedTreasurePlayerDescription player -> Just player
-    _ -> Nothing
-
-unwrapFogOfBattle :: Core.PlayerDescription -> Maybe FogOfBattle.PlayerDescription
-unwrapFogOfBattle = \case
-    Core.FogOfBattlePlayerDescription player -> Just player
-    _ -> Nothing
-
-unwrapArtOfWar :: Core.PlayerDescription -> Maybe ArtOfWar.PlayerDescription
-unwrapArtOfWar = \case
-    Core.ArtOfWarPlayerDescription player -> Just player
-    _ -> Nothing
-
-unwrapRealEstate :: Core.PlayerDescription -> Maybe RealEstate.PlayerDescription
-unwrapRealEstate = \case
-    Core.RealEstatePlayerDescription player -> Just player
-    _ -> Nothing
 
 unwrapCursedTreasureMove :: Core.PlayerMove -> Maybe CursedTreasure.PlayerMove
 unwrapCursedTreasureMove = \case

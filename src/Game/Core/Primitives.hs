@@ -1,6 +1,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 module Game.Core.Primitives
-    ( PlayerId
+    ( PlayerDescription (..)
+    , PlayerId
     , mkPlayerId
     , unPlayerId
     , allPlayerIds
@@ -32,6 +33,15 @@ where
 import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=), object, withObject, withScientific)
 import qualified Data.Map.Strict as Map
 import System.Random (StdGen, mkStdGen)
+
+data PlayerDescription = PlayerDescription
+    { playerRuleset :: Text
+    , playerId :: PlayerId
+    , playerName :: Text
+    , playerAI :: Text
+    , playerColor :: GameColor
+    }
+    deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 newtype PlayerId = PlayerId Int
     deriving stock (Show, Eq, Ord, Generic)

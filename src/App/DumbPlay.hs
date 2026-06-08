@@ -125,7 +125,7 @@ createInitialGame CursedTreasure rng0 =
     let (selectedPlayerCount, rng1) = chooseInt 2 4 rng0
         setupPlayers = take selectedPlayerCount CursedTreasure.getGameSetupPlayers
         seedValue = 12345
-     in case Core.createNewGame (map Core.CursedTreasurePlayerDescription setupPlayers) seedValue of
+         in case Core.createNewGame setupPlayers seedValue of
             Left err -> Left err
             Right (gameState, _) -> Right (gameState, rng1)
 

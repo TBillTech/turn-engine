@@ -1,7 +1,6 @@
 module Game.Core.Types
     ( module Game.Core.Primitives
     , GameState (..)
-    , PlayerDescription (..)
     , PlayerMove (..)
     , CensoredGameState (..)
     )
@@ -23,13 +22,6 @@ data GameState
     | FogOfBattleGame FogOfBattle.GameState
     | ArtOfWarGame ArtOfWar.GameState
     | RealEstateGame RealEstate.GameState
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data PlayerDescription
-    = CursedTreasurePlayerDescription CursedTreasure.PlayerDescription
-    | FogOfBattlePlayerDescription FogOfBattle.PlayerDescription
-    | ArtOfWarPlayerDescription ArtOfWar.PlayerDescription
-    | RealEstatePlayerDescription RealEstate.PlayerDescription
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 data PlayerMove

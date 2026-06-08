@@ -46,7 +46,7 @@ import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.List as List
 
 import Game.Core.Primitives (CubeCoordinateTokens, CubeCoordinate,
-    HourHand, GameColor (..), PlayerId, ToGameColor(..), allGameColors, allPlayerIds,
+    HourHand, GameColor (..), PlayerDescription (..), PlayerId, ToGameColor(..), allGameColors, allPlayerIds,
     SeedStream, mkSeedStream)
 
 newtype PlayerColor = PlayerColor GameColor
@@ -135,14 +135,6 @@ data TreasureCard
     = HiddenTreasure | Treasure Int | Curse
     deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
 
-data PlayerDescription = PlayerDescription
-    { playerId :: PlayerId
-    , playerName :: Text
-    , playerAI :: Text
-    , playerColor :: PlayerColor
-    }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
 data Score = CurrentScore Int | WinnerScore Int
     deriving (Show, Ord, Eq, Generic, FromJSON, ToJSON)
 
@@ -209,6 +201,10 @@ validateSetupPlayers playerDescriptions = do
     when (length playerDescriptions < 2 || length playerDescriptions > 4) $
         Left "Cursed Treasure requires between 2 and 4 players"
     void (validatePlayerSequence playerIds)
+    when (any ((/= "Cursed Treasure") . (.playerRuleset)) playerDescriptions) $
+        Left "Cursed Treasure setup players must declare the Cursed Treasure ruleset"
+    when (any (isNothing . mkPlayerColor) playerColors) $
+        Left "Cursed Treasure player colors must be Red, Green, Blue, or Purple"
     when (hasDuplicates playerColors) $ Left "Cursed Treasure player colors must be unique"
     pure playerDescriptions
   where

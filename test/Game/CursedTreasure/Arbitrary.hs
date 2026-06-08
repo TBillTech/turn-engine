@@ -5,7 +5,7 @@ module Game.CursedTreasure.Arbitrary () where
 import Test.QuickCheck
 
 import Game.Arbitrary ()
-import Game.Core.Primitives (SeedStream, mkSeedStream)
+import Game.Core.Primitives (SeedStream, ToGameColor (..), mkSeedStream)
 import Game.CursedTreasure.Types
     ( ClueCard (..)
     , ClueColor
@@ -73,11 +73,19 @@ instance Arbitrary TreasureCard where
 
 instance Arbitrary PlayerDescription where
     arbitrary =
-        PlayerDescription
-            <$> arbitrary
-            <*> arbitrary
-            <*> arbitrary
-            <*> arbitrary
+        do
+            pid <- arbitrary
+            pname <- arbitrary
+            pai <- arbitrary
+            pcolor <- arbitrary
+            pure
+                PlayerDescription
+                    { playerRuleset = "Cursed Treasure"
+                    , playerId = pid
+                    , playerName = pname
+                    , playerAI = pai
+                    , playerColor = toGameColor (pcolor :: PlayerColor)
+                    }
 
 instance Arbitrary Score where
     arbitrary = oneof [CurrentScore <$> arbitrary, WinnerScore <$> arbitrary]

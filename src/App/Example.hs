@@ -233,7 +233,7 @@ buildInitialRequest :: RulesetName -> Either Text ServiceRequest
 buildInitialRequest CursedTreasure =
     let selectedPlayerCount = 3
         setupPlayers = zipWith renamePlayer cursedTreasureExampleNames (take selectedPlayerCount CursedTreasure.getGameSetupPlayers)
-     in Right (CreateNewGame (map Core.CursedTreasurePlayerDescription setupPlayers) 12345)
+    in Right (CreateNewGame setupPlayers 12345)
 
 cursedTreasureExampleNames :: [Text]
 cursedTreasureExampleNames =

@@ -92,18 +92,27 @@ sampleCreateNewGameRequest = CreateNewGame samplePlayers 12345
 
 samplePlayers :: [Core.PlayerDescription]
 samplePlayers =
-    [ Core.RealEstatePlayerDescription (RealEstate.PlayerDescription "Jose Álvarez")
-    , Core.RealEstatePlayerDescription (RealEstate.PlayerDescription "Miyu 星")
+    [ Core.PlayerDescription
+        { Core.playerRuleset = "Real Estate"
+        , Core.playerId = fromMaybe (error "PlayerId 1 must be valid") (Core.mkPlayerId 1)
+        , Core.playerName = "Jose Álvarez"
+        , Core.playerAI = "Unassigned"
+        , Core.playerColor = Core.Red
+        }
+    , Core.PlayerDescription
+        { Core.playerRuleset = "Real Estate"
+        , Core.playerId = fromMaybe (error "PlayerId 2 must be valid") (Core.mkPlayerId 2)
+        , Core.playerName = "Miyu 星"
+        , Core.playerAI = "Unassigned"
+        , Core.playerColor = Core.Green
+        }
     ]
 
 sampleGameState :: Core.GameState
 sampleGameState =
     Core.RealEstateGame
         (RealEstate.GameState
-            { players =
-                [ RealEstate.PlayerDescription "Jose Álvarez"
-                , RealEstate.PlayerDescription "Miyu 星"
-                ]
+            { players = samplePlayers
             , turn = 0
             , activePlayer = sampleActivePlayer
             , latestMessage = ""
@@ -121,10 +130,7 @@ sampleCensoredState :: RealEstate.CensoredGameState
 sampleCensoredState =
     RealEstate.CensoredGameState
         (RealEstate.GameState
-            { players =
-                [ RealEstate.PlayerDescription "Jose Álvarez"
-                , RealEstate.PlayerDescription "Miyu 星"
-                ]
+            { players = samplePlayers
             , turn = 0
             , activePlayer = sampleActivePlayer
             , latestMessage = ""
@@ -142,25 +148,25 @@ getGameSetupPlayersRequestJson :: StrictByteString.ByteString
 getGameSetupPlayersRequestJson = utf8Json "{\"request\":\"getGameSetupPlayers\"}"
 
 createNewGameRequestJson :: StrictByteString.ByteString
-createNewGameRequestJson = utf8Json "{\"request\":\"createNewGame\",\"players\":[{\"tag\":\"RealEstatePlayerDescription\",\"contents\":{\"playerName\":\"Jose Álvarez\"}},{\"tag\":\"RealEstatePlayerDescription\",\"contents\":{\"playerName\":\"Miyu 星\"}}],\"randomSeed\":12345}"
+createNewGameRequestJson = utf8Json "{\"request\":\"createNewGame\",\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"randomSeed\":12345}"
 
 enumerateOptionsRequestJson :: StrictByteString.ByteString
-enumerateOptionsRequestJson = utf8Json "{\"request\":\"enumerateActivePlayerOptions\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}}"
+enumerateOptionsRequestJson = utf8Json "{\"request\":\"enumerateActivePlayerOptions\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}}"
 
 makeMoveRequestJson :: StrictByteString.ByteString
-makeMoveRequestJson = utf8Json "{\"request\":\"makeMove\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}"
+makeMoveRequestJson = utf8Json "{\"request\":\"makeMove\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}"
 
 heuristicHintRequestJson :: StrictByteString.ByteString
-heuristicHintRequestJson = utf8Json "{\"request\":\"heuristicHint\",\"level\":2,\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerMoves\":[{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}]}"
+heuristicHintRequestJson = utf8Json "{\"request\":\"heuristicHint\",\"level\":2,\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerMoves\":[{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}]}"
 
 summaryRequestJson :: StrictByteString.ByteString
-summaryRequestJson = utf8Json "{\"request\":\"summary\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}}"
+summaryRequestJson = utf8Json "{\"request\":\"summary\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}}"
 
 gameSetupPlayersResponseJson :: StrictByteString.ByteString
-gameSetupPlayersResponseJson = utf8Json "{\"response\":\"gameSetupPlayers\",\"rulesets\":[{\"name\":\"Cursed Treasure\",\"playerTemplates\":[{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":1,\"playerName\":\"Player PlayerId 1\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":2,\"playerName\":\"Player PlayerId 2\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":3,\"playerName\":\"Player PlayerId 3\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Blue\"}},{\"tag\":\"CursedTreasurePlayerDescription\",\"contents\":{\"playerId\":4,\"playerName\":\"Player PlayerId 4\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Purple\"}}]},{\"name\":\"Fog Of Battle\",\"playerTemplates\":[]},{\"name\":\"Art Of War\",\"playerTemplates\":[]},{\"name\":\"Real Estate\",\"playerTemplates\":[]}]}"
+gameSetupPlayersResponseJson = utf8Json "{\"response\":\"gameSetupPlayers\",\"rulesets\":[{\"name\":\"Cursed Treasure\",\"playerTemplates\":[{\"playerRuleset\":\"Cursed Treasure\",\"playerId\":1,\"playerName\":\"Player PlayerId 1\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Cursed Treasure\",\"playerId\":2,\"playerName\":\"Player PlayerId 2\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"},{\"playerRuleset\":\"Cursed Treasure\",\"playerId\":3,\"playerName\":\"Player PlayerId 3\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Blue\"},{\"playerRuleset\":\"Cursed Treasure\",\"playerId\":4,\"playerName\":\"Player PlayerId 4\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Purple\"}]},{\"name\":\"Fog Of Battle\",\"playerTemplates\":[]},{\"name\":\"Art Of War\",\"playerTemplates\":[]},{\"name\":\"Real Estate\",\"playerTemplates\":[]}]}"
 
 newGameCreatedSuccessJson :: StrictByteString.ByteString
-newGameCreatedSuccessJson = utf8Json "{\"response\":\"newGameCreated\",\"status\":\"ok\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}]}"
+newGameCreatedSuccessJson = utf8Json "{\"response\":\"newGameCreated\",\"status\":\"ok\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}]}"
 
 newGameCreatedErrorJson :: StrictByteString.ByteString
 newGameCreatedErrorJson = utf8Json "{\"response\":\"newGameCreated\",\"status\":\"error\",\"message\":\"PlayerDescription list must be non-empty and all match the same ruleset.\"}"
@@ -169,7 +175,7 @@ activePlayerOptionsResponseJson :: StrictByteString.ByteString
 activePlayerOptionsResponseJson = utf8Json "{\"response\":\"activePlayerOptions\",\"playerMoves\":[]}"
 
 moveAppliedResponseJson :: StrictByteString.ByteString
-moveAppliedResponseJson = utf8Json "{\"response\":\"moveApplied\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerName\":\"Jose Álvarez\"},{\"playerName\":\"Miyu 星\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}]}"
+moveAppliedResponseJson = utf8Json "{\"response\":\"moveApplied\",\"gameState\":{\"tag\":\"RealEstateGame\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},\"playerViews\":[{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}},{\"tag\":\"RealEstateCensoredGameState\",\"contents\":{\"players\":[{\"playerRuleset\":\"Real Estate\",\"playerId\":1,\"playerName\":\"Jose Álvarez\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Red\"},{\"playerRuleset\":\"Real Estate\",\"playerId\":2,\"playerName\":\"Miyu 星\",\"playerAI\":\"Unassigned\",\"playerColor\":\"Green\"}],\"turn\":0,\"activePlayer\":1,\"latestMessage\":\"\",\"gameOver\":true,\"seed\":[0,0]}}]}"
 
 hintGeneratedResponseJson :: StrictByteString.ByteString
 hintGeneratedResponseJson = utf8Json "{\"response\":\"hintGenerated\",\"hints\":[{\"score\":0,\"playerMove\":{\"tag\":\"RealEstatePlayerMove\",\"contents\":[]}}]}"

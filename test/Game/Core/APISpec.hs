@@ -2,7 +2,6 @@ module Game.Core.APISpec where
 
 import Test.Hspec
 
-import qualified Game.ArtOfWar.Types as ArtOfWar
 import qualified Game.Core.API as Core
 import Game.Core.Types
 import qualified Game.CursedTreasure.API as CursedTreasure
@@ -24,18 +23,19 @@ spec = do
 
         it "rejects Cursed Treasure players outside the ruleset player id range" $ do
             let invalidPlayer =
-                    CursedTreasure.PlayerDescription
-                        { CursedTreasure.playerId = fromMaybe (error "expected positive PlayerId") (mkPlayerId 5)
-                        , CursedTreasure.playerName = "Player 5"
-                        , CursedTreasure.playerAI = "Unassigned"
-                        , CursedTreasure.playerColor = CursedTreasure.PlayerColor Red
+                    PlayerDescription
+                        { playerRuleset = "Cursed Treasure"
+                        , playerId = fromMaybe (error "expected positive PlayerId") (mkPlayerId 5)
+                        , playerName = "Player 5"
+                        , playerAI = "Unassigned"
+                        , playerColor = Red
                         }
                 validPlayer =
                     case CursedTreasure.getGameSetupPlayers of
                         player : _ -> player
                         [] -> error "expected Cursed Treasure setup player"
 
-            Core.createNewGame [CursedTreasurePlayerDescription validPlayer, CursedTreasurePlayerDescription invalidPlayer] 0
+            Core.createNewGame [validPlayer, invalidPlayer] 0
                 `shouldBe` Left "Cursed Treasure playerId must be an integer from 1 to 4"
 
         it "rejects mixed player description rulesets" $ do
@@ -44,8 +44,14 @@ spec = do
                         player : _ -> player
                         [] -> error "expected Cursed Treasure setup player"
                 mixedPlayers =
-                    [ CursedTreasurePlayerDescription cursedTreasurePlayer
-                    , ArtOfWarPlayerDescription (ArtOfWar.PlayerDescription "Player")
+                    [ cursedTreasurePlayer
+                    , PlayerDescription
+                        { playerRuleset = "Art Of War"
+                        , playerId = fromMaybe (error "expected positive PlayerId") (mkPlayerId 1)
+                        , playerName = "Player"
+                        , playerAI = "Unassigned"
+                        , playerColor = Red
+                        }
                     ]
 
             Core.createNewGame mixedPlayers 0
@@ -54,9 +60,8 @@ spec = do
     describe "CursedTreasure delegation" $ do
         it "delegates enumerateActivePlayerOptions and makeMove" $ do
             let players = take 2 CursedTreasure.getGameSetupPlayers
-                wrappedPlayers = map CursedTreasurePlayerDescription players
                 coreState =
-                    case Core.createNewGame wrappedPlayers 12345 of
+                    case Core.createNewGame players 12345 of
                         Right (gameState, _) -> gameState
                         Left err -> error $ "expected CursedTreasure game creation to succeed: " <> show err
                 cursedState = case coreState of
@@ -76,9 +81,8 @@ spec = do
 
         it "delegates heuristicHint" $ do
             let players = take 2 CursedTreasure.getGameSetupPlayers
-                wrappedPlayers = map CursedTreasurePlayerDescription players
                 coreState =
-                    case Core.createNewGame wrappedPlayers 12345 of
+                    case Core.createNewGame players 12345 of
                         Right (gameState, _) -> gameState
                         Left err -> error $ "expected CursedTreasure game creation to succeed: " <> show err
                 cursedState = case coreState of

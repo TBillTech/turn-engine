@@ -50,7 +50,7 @@ getGameSetupPlayers = CoreAPI.getGameSetupPlayers
 -- But the createNewGame talks the VoxelVerse language (and also tracks the underlying GameState).
 -- From the standpoint of downstream logic, the GameState is opaque, but needs to be tracked.
 createNewGame :: [Core.PlayerDescription] -> Int
-    -> Either Text (VoxelVerseSession, VoxelVerseView Core.PlayerDescription)
+    -> Either Text (VoxelVerseSession, VoxelVerseView)
 createNewGame players randomSeed = do
   createdGame <- CoreAPI.createNewGame players randomSeed
   session <- initializeSession createdGame
@@ -58,7 +58,7 @@ createNewGame players randomSeed = do
   where
     initializeSession :: (Core.GameState, [Core.CensoredGameState]) -> Either Text VoxelVerseSession
     initializeSession (gameState, censoredStates) = do
-      censoredState <- maybe (Left "VoxelVerse.createNewGame requires at least one player view") Right (viaNonEmpty head censoredStates)
+      censoredState <- maybeToRight "VoxelVerse.createNewGame requires at least one player view" (viaNonEmpty head censoredStates)
       pure VoxelVerseSession
         { vvContext = VoxelVerseContext
           { previousCommittedState = Nothing
@@ -85,11 +85,11 @@ createNewGame players randomSeed = do
 summary :: Core.GameState -> Text
 summary = CoreAPI.summary
 
-initialVoxelVerseState :: Core.CensoredGameState -> VoxelVerseState Core.PlayerDescription
+initialVoxelVerseState :: Core.CensoredGameState -> VoxelVerseState
 initialVoxelVerseState gameState = undefined
 
 initialVoxelVerseDelta :: Core.CensoredGameState -> VoxelVerseDelta
-initialVoxelVerseDelta gameState = undefined 
+initialVoxelVerseDelta gameState = undefined
 
 initialInteractionState :: Core.CensoredGameState -> VoxelVerseInteractionState
 initialInteractionState gameState =
@@ -127,7 +127,7 @@ data VoxelVerseContext = VoxelVerseContext
 
 data VoxelVerseSession = VoxelVerseSession
     { vvContext :: VoxelVerseContext
-    , vvModel :: VoxelVerseState Core.PlayerDescription
+    , vvModel :: VoxelVerseState
     , vvModelDelta :: VoxelVerseDelta
     , vvInteractionState :: VoxelVerseInteractionState
     , vvProjectionState :: VoxelVerseProjectionState
@@ -135,7 +135,7 @@ data VoxelVerseSession = VoxelVerseSession
 
 data SessionState = SessionState
     {
-      voxelVerseState :: VoxelVerseState Core.PlayerDescription
+      voxelVerseState :: VoxelVerseState
     , voxelVerseInteractionState :: VoxelVerseInteractionState
     , voxelVerseProjectionState :: VoxelVerseProjectionState
     }
@@ -146,7 +146,7 @@ type SessionM a = RWST VoxelVerseContext VoxelVerseDelta SessionState (Either Te
 -- AND enumerateActivePlayerOptions AND hueristicHint. It even entails ViewPorts, since a ViewPort
 -- turns out to be simply another kind of Tool Application.
 applyTool :: VoxelVerseSession -> ToolApplication
-  -> Either Text (VoxelVerseSession, VoxelVerseView Core.PlayerDescription)
+  -> Either Text (VoxelVerseSession, VoxelVerseView)
 applyTool session toolApplication =
     case runRWST (applyToolM toolApplication) session.vvContext sessionState of
         Left err -> Left err
@@ -168,7 +168,7 @@ applyTool session toolApplication =
       }
     createView sess = (sess, createVoxelVerseUpdate sess)
 
-createVoxelVerseUpdate :: VoxelVerseSession -> VoxelVerseView Core.PlayerDescription
+createVoxelVerseUpdate :: VoxelVerseSession -> VoxelVerseView
 createVoxelVerseUpdate sess = undefined
 
 applyToolM :: ToolApplication -> SessionM VoxelVerseContext

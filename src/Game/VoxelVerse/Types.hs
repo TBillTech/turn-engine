@@ -36,6 +36,7 @@ import qualified Game.ArtOfWar.VoxelVerse.Types as ArtOfWar
 import qualified Game.CursedTreasure.VoxelVerse.Types as CursedTreasure
 import qualified Game.FogOfBattle.VoxelVerse.Types as FogOfBattle
 import qualified Game.RealEstate.VoxelVerse.Types as RealEstate
+import qualified Game.Core.Primitives as Primitives
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Relude.Extra (bimapF, maximum1, minimum1)
@@ -305,11 +306,11 @@ data VoxelLayerState = VoxelLayerState {
     voxels :: VoxelBlock Voxel
 }
 
-data VoxelVerseState playerType = VoxelVerseState {
+data VoxelVerseState = VoxelVerseState {
     propertyGroups :: PropertyGroups,
-    activePlayer :: playerType,
-    viewingPlayer :: playerType,
-    playerSequence :: [playerType],
+    activePlayer :: Primitives.PlayerId,
+    viewingPlayer :: Primitives.PlayerId,
+    playerSequence :: [Primitives.PlayerDescription],
     voxelLayers :: [VoxelLayerState]
 }
 
@@ -380,12 +381,12 @@ data VoxelLayerView = VoxelLayerView {
 -- createVoxelVerseView, the resulting VoxelVerseView will be generated and passed along to
 -- the downstream logic. This resembles the VoxelVerse data structure in most ways, but is
 -- organized for downstream use and potentially filtered by the createVoxelVerseView function.
-data VoxelVerseView playerType = VoxelVerseView 
+data VoxelVerseView = VoxelVerseView 
     { propertyGroups :: PropertyGroups
     , propertySets :: PropertySets
-    , activePlayer :: playerType
-    , playerId :: Int
-    , playerSequence :: [playerType]
+    , activePlayer :: Primitives.PlayerId
+    , viewingPlayer :: Primitives.PlayerId
+    , playerSequence :: [Primitives.PlayerDescription]
     , toolApplication :: ToolApplication
     , voxelLayers :: [VoxelLayerView]
     } 

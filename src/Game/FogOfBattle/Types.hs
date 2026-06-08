@@ -9,12 +9,7 @@ module Game.FogOfBattle.Types
 where
 
 import Data.Aeson (FromJSON (..), ToJSON, (.:), (.:?), (.!=), withObject)
-import Game.Core.Primitives (PlayerId, SeedStream, mkPlayerId, mkSeedStream)
-
-data PlayerDescription = PlayerDescription
-    { playerName :: Text
-    }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+import Game.Core.Primitives (PlayerDescription (..), PlayerId, SeedStream, mkPlayerId, mkSeedStream)
 
 data PlayerMove = NoOpMove
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
