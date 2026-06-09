@@ -26,12 +26,15 @@ module Game.VoxelVerse.Types
         VoxelVerseState (..),
         VoxelVerseDelta,
         ToolApplication,
+        VoxelOption (..),
+        VoxelBlock,
         VoxelVerseInteractionState (..),
         VoxelVerseProjectionState (..),
         VoxelVerseView,
         VoxelVerseSession (..),
         VoxelVersePlayerSession (..),
-        SessionState (..)
+        SessionState (..),
+        coordinatesToVoxelBlock
     )
 where
 
@@ -42,6 +45,7 @@ import qualified Game.RealEstate.VoxelVerse.Types as RealEstate
 import qualified Game.Core.Primitives as Primitives
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Relude.Extra (maximum1, minimum1)     
 
 
 data VoxelVerseInteractionState
@@ -199,8 +203,8 @@ type SparseHexVoxels = Map QRCoord Voxel
 -- Or perhaps more likely a dense array
 type FirstRowIndex = Int
 type FirstColumnIndex = Int
-type VoxelRow voxelType = (FirstRowIndex, [voxelType])
-type VoxelBlock voxelType = (FirstColumnIndex, [VoxelRow voxelType])
+type VoxelRow voxelType = (FirstColumnIndex, [voxelType])
+type VoxelBlock voxelType = (FirstRowIndex, [VoxelRow voxelType])
 
 -- But there is also a need to track changes from one game state to the next, which we notionally
 -- expect to change a small fraction of the voxels. Moreover, we need to track voxel destruction,
@@ -411,3 +415,30 @@ data SessionState interactionType projectionType = SessionState
     , voxelVerseInteractionState :: interactionType
     , voxelVerseProjectionState :: projectionType
     }
+
+-- | Convert sparse cube-coordinate voxel options into a dense rectangular
+--   'VoxelBlock'. Missing cells inside the computed bounds are filled with
+--   'NoVoxel'.
+--
+--   Duplicate coordinates follow 'Map.fromList' semantics: the last entry wins.
+coordinatesToVoxelBlock :: [(Primitives.CubeCoordinate Int, VoxelOption)] -> VoxelBlock VoxelOption
+coordinatesToVoxelBlock [] = (0, [])
+coordinatesToVoxelBlock pairs =
+    (minR, map buildRow [minR .. maxR])
+  where
+    cellMap = Map.fromList
+        [ (Primitives.toPair coord, voxel)
+        | (coord, voxel) <- pairs
+        ]
+    qs = map fst (Map.keys cellMap)
+    rs = map snd (Map.keys cellMap)
+    minQ = maybe 0 minimum1 $ nonEmpty qs
+    maxQ = maybe 0 maximum1 $ nonEmpty qs
+    minR = maybe 0 minimum1 $ nonEmpty rs
+    maxR = maybe 0 maximum1 $ nonEmpty rs
+    buildRow r =
+        ( minQ
+        , [ fromMaybe NoVoxel (Map.lookup (q, r) cellMap)
+          | q <- [minQ .. maxQ]
+          ]
+        )

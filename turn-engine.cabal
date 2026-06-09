@@ -52,6 +52,7 @@ library
         Game.Core.Primitives
         Game.Core.Types
         Game.VoxelVerse.API
+        Game.VoxelVerse.Layout
         Game.VoxelVerse.Query
         Game.VoxelVerse.Types
         Game.ArtOfWar.API
@@ -99,6 +100,7 @@ test-suite turn-engine-test
                     , Game.Arbitrary
                     , Game.CursedTreasure.Arbitrary
                     , Game.CursedTreasure.APISpec
+                    , Game.VoxelVerse.LayoutSpec
     hs-source-dirs:   test
     build-depends:
         turn-engine,
