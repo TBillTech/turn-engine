@@ -15,3 +15,4 @@ data InteractionState = InteractionState {
 data ProjectionState = ProjectionState {
 
 } deriving (Show, Eq, Generic, FromJSON, ToJSON)
+

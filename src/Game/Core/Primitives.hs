@@ -27,6 +27,7 @@ module Game.Core.Primitives
     , mkSeedStream
     , seedStreamStdGen
     , nextSeedStream
+    , Context (..)
     )
 where
 
@@ -279,3 +280,17 @@ seedStreamStdGen (SeedStream base index) = mkStdGen mixed
         mixed = fromInteger ((a * 6364136223846793005 + b * 1442695040888963407 + 11400714819323198485) `mod` 2147483647)
         a = toInteger base
         b = toInteger index
+
+data Context stateType = Context
+    { previousCommittedState :: Maybe stateType
+    , currentState :: stateType
+    , planningState :: Maybe stateType
+    }
+
+instance Functor Context where
+    fmap :: (a -> b) -> Context a -> Context b
+    fmap f ctx = Context 
+        { previousCommittedState = f <$> ctx.previousCommittedState
+        , currentState = f ctx.currentState
+        , planningState = f <$> ctx.planningState
+        }

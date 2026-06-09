@@ -28,7 +28,10 @@ module Game.VoxelVerse.Types
         ToolApplication,
         VoxelVerseInteractionState (..),
         VoxelVerseProjectionState (..),
-        VoxelVerseView
+        VoxelVerseView,
+        VoxelVerseSession (..),
+        VoxelVersePlayerSession (..),
+        SessionState (..)
     )
 where
 
@@ -39,7 +42,6 @@ import qualified Game.RealEstate.VoxelVerse.Types as RealEstate
 import qualified Game.Core.Primitives as Primitives
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Relude.Extra (bimapF, maximum1, minimum1)
 
 
 data VoxelVerseInteractionState
@@ -308,10 +310,8 @@ data VoxelLayerState = VoxelLayerState {
 
 data VoxelVerseState = VoxelVerseState {
     propertyGroups :: PropertyGroups,
-    activePlayer :: Primitives.PlayerId,
-    viewingPlayer :: Primitives.PlayerId,
-    playerSequence :: [Primitives.PlayerDescription],
-    voxelLayers :: [VoxelLayerState]
+    voxelLayers :: [VoxelLayerState],
+    thisPlayer :: Primitives.PlayerId
 }
 
 data VoxelVerseDelta = VoxelVerseDelta {
@@ -382,11 +382,32 @@ data VoxelLayerView = VoxelLayerView {
 -- the downstream logic. This resembles the VoxelVerse data structure in most ways, but is
 -- organized for downstream use and potentially filtered by the createVoxelVerseView function.
 data VoxelVerseView = VoxelVerseView 
-    { propertyGroups :: PropertyGroups
+    { viewingPlayer :: Primitives.PlayerId
+    , propertyGroups :: PropertyGroups
     , propertySets :: PropertySets
-    , activePlayer :: Primitives.PlayerId
-    , viewingPlayer :: Primitives.PlayerId
-    , playerSequence :: [Primitives.PlayerDescription]
     , toolApplication :: ToolApplication
     , voxelLayers :: [VoxelLayerView]
     } 
+
+-- Generally speaking, the unrestricted Core.GameState needs to be preserved and kept for future
+-- calls to the underlying API, and for correct GameState computations. It may also be necessary to
+-- revert to a previously committed state, so we need a copy of a previous state for that purpose.
+-- Otherwise, the logic at the VoxelVerse level should be consistently using a CensoredGameState. 
+data VoxelVerseSession contextType playerType = VoxelVerseSession
+    { vvContext :: contextType
+    , vvPlayerSessions :: [playerType]
+    }
+
+data VoxelVersePlayerSession contextType interactionType projectionType = VoxelVersePlayerSession
+    { playerContext :: contextType
+    , playerModel :: VoxelVerseState
+    , playerModelDelta :: VoxelVerseDelta
+    , playerInteractionState :: interactionType
+    , playerProjectionState :: projectionType
+    }
+
+data SessionState interactionType projectionType = SessionState
+    { voxelVerseState :: VoxelVerseState
+    , voxelVerseInteractionState :: interactionType
+    , voxelVerseProjectionState :: projectionType
+    }
