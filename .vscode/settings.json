@@ -1,4 +1,6 @@
 {
+    "haskell.serverExecutablePath": "D:\\ghcup\\bin\\haskell-language-server-wrapper.exe",
+    "haskell.plugin.semanticTokens.globalOn": true,
     "chat.tools.terminal.autoApprove": {
         "cabal": true
     }

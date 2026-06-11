@@ -247,10 +247,10 @@ data CellSearchError
 --   Searches each row for a sequence of ParsedHexCells that matches the list of the fst of the
 --   CellRunSearch tuples. If the row matches more than one time, and if any two matches overlap,
 --   creates a CellSearchError.  Also creates a CellSearchError if the wrong number of matches is found.
-findRowCellMatches :: Maybe Int -> CellRunSearch a -> Int -> [ParsedHexCell]
-    -> Either [CellSearchError] [CellRunMatch a]
-findRowCellMatches mCount search rowId cellRow
-    | null errors = Right $ map ((,payload) . snd) matches
+findRowCellMatches :: (Maybe Int, CellRunSearch a) -> (Int, [ParsedHexCell])
+    -> Either [CellSearchError] [(Int, CellRunMatch a)]
+findRowCellMatches (mCount, search) (rowId, cellRow)
+    | null errors = Right $ map (second (,payload)) matches
     | otherwise = Left errors
     where   toFind = fst search
             payload = snd search
@@ -259,7 +259,7 @@ findRowCellMatches mCount search rowId cellRow
             candidates = map toCandidate possibleLocs
             toCandidate i = (i, take fLength $ drop i cellRow)
             matches = filter (matchTokens toFind . snd) candidates
-            matchTokens find b = find == map (.cellToken) b
+            matchTokens f b = f == map (.cellToken) b
             overlaps = filter ((fLength >= ) . uncurry (-) . bimap fst fst) $ zip (drop 1 matches) matches
             overlapErrors = map ((\o -> OverlappingCellSearch { leRow = rowId, leCol = o}) . fst . fst) overlaps
             countError Nothing _ = []
@@ -267,12 +267,30 @@ findRowCellMatches mCount search rowId cellRow
                                    | otherwise = [SearchCountWrongError {cpExpected = c, cpActual = mC}]
             errors = countError mCount (length matches) ++ overlapErrors
 
-findCellMatches :: Maybe Int -> CellRunSearch a -> [[ParsedHexCell]]
-    -> Either [CellSearchError] [CellRunMatch a]
-findCellMatches mCount search cellRows 
+findRowMixedCellMatches :: [(Maybe Int, CellRunSearch a)] -> (Int, [ParsedHexCell])
+    -> Either [CellSearchError] [(Int, CellRunMatch a)]
+findRowMixedCellMatches countSearches (rowId, cellRow)
         | null errors = Right allMatches
         | otherwise = Left errors
-    where   eRowMatches = zipWith (findRowCellMatches Nothing search) [0..1] cellRows
+    where   eMixedCellMatches = map (`findRowCellMatches` (rowId, cellRow)) countSearches
+            (errorLists, rowMatches) = partitionEithers eMixedCellMatches
+            allMatches = sortWith fst $ concat rowMatches
+            blockTuples = map (second (length . fst)) allMatches
+            overlaps collisions [] = collisions
+            overlaps collisions ((b,e):rest) = overlaps (curCollisions (b+e) rest ++ collisions) rest
+            curCollisions _ [] = []
+            curCollisions e (block:rest) | fst block <= e = block:curCollisions e rest
+                                         | otherwise = []
+            overlapErrors = map ((\o -> OverlappingCellSearch { leRow = rowId, leCol = o}) . fst) 
+                $ overlaps [] blockTuples
+            errors = concat errorLists ++ overlapErrors
+
+findCellMatches :: Maybe Int -> CellRunSearch a -> [[ParsedHexCell]]
+    -> Either [CellSearchError] [CellRunMatch a]
+findCellMatches mCount search cellRows
+        | null errors = Right $ map snd allMatches
+        | otherwise = Left errors
+    where   eRowMatches = zipWith (curry (findRowCellMatches (Nothing, search))) [0..1] cellRows
             (errorLists, rowMatches) = partitionEithers eRowMatches
             allMatches = concat rowMatches
             countError Nothing _ = []
@@ -280,6 +298,15 @@ findCellMatches mCount search cellRows
                                    | otherwise = [SearchCountWrongError {cpExpected = c, cpActual = mC}]
             errors = countError mCount (length allMatches) ++ concat errorLists
 
+findAllCellMatches :: [CellRunSearch a] -> [[ParsedHexCell]]
+    -> Either [CellSearchError] [CellRunMatch a]
+findAllCellMatches searches cellRows
+        | null errors = Right $ map snd allMatches
+        | otherwise = Left errors
+    where   eRowMatches = zipWith (curry (findRowMixedCellMatches $ map (Nothing, ) searches)) [0..1] cellRows
+            (errorLists, rowMatches) = partitionEithers eRowMatches
+            allMatches = concat rowMatches
+            errors = concat errorLists
 
 
 -- | Map parsed hex cells to @(cell, descriptor)@ pairs using a dictionary.
