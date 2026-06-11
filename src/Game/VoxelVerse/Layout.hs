@@ -98,7 +98,7 @@ data LayoutSpec = LayoutSpec
       -- ^ A token that represents an absent cell (skipped; not added to output).
     , strictWidth :: Maybe Int
       -- ^ When @Just n@, every row must tokenise to exactly @n@ cells;
-      --   any deviation produces a 'RowLengthMismatch' error.
+      --   any deviation produces a 'RowLengthMismatch' errorLists
     , anchorCol   :: Int
       -- ^ Column index (0-based) that maps to @q = 0@.  Default @0@.
     , anchorRow   :: Int
@@ -125,7 +125,8 @@ defaultLayoutSpec = LayoutSpec
 type LayoutDictionary descriptor = Map Text descriptor
 
 -- | Build a 'LayoutDictionary' from a list of @(token, descriptor)@ pairs.
---   Returns 'Left' with a 'DuplicateDictionaryKey' error for every key that
+--   Returns 'Left' with a 'DuplicateDictionaryKey' errorLists
+--   for every key that
 --   appears more than once; returns 'Right' when all keys are unique.
 makeDictionary
     :: [(Text, descriptor)]
@@ -193,7 +194,7 @@ parseHexLayout spec rows =
     let indexed  = zip [0..] (map words rows)
         errors   = map (widthErrors spec) indexed
         cells    = map (rowToCells  spec) indexed
-    in  if any (not . null) errors then Left errors else Right cells
+    in  if not (all null errors) then Left errors else Right cells
 
 concatHexRows :: Either [[LayoutError]] [[ParsedHexCell]] -> Either [LayoutError] [ParsedHexCell]
 concatHexRows = bimap concat concat
@@ -224,6 +225,62 @@ buildCell spec rowIdx colIdx tok =
         , cellR     = r
         , cellToken = tok
         }
+
+-- A CellRunSearch is a list of Text to match in the rows of the ParsedHexCells. 
+type CellRunSearch a = ([Text], a)
+-- When a CellRunSearch is found, we construct a CellRunMatch to track the matched cells plus payload.
+type CellRunMatch a = ([ParsedHexCell], a)
+
+data CellSearchError
+    = OverlappingCellSearch
+        { leRow :: Int      -- ^ 0-based row index of first collision cell
+        , leCol :: Int            -- ^ 0-based column index of first collision cell
+        }
+    | SearchCountWrongError
+        { cpExpected :: Int -- ^ count of expected Cell Search matches
+        , cpActual   :: Int -- ^ actual count of Cell Search matches
+        }
+    deriving (Show, Eq)
+
+-- | Find and track CellRunSearch on a row of ParsedHexCells
+--
+--   Searches each row for a sequence of ParsedHexCells that matches the list of the fst of the
+--   CellRunSearch tuples. If the row matches more than one time, and if any two matches overlap,
+--   creates a CellSearchError.  Also creates a CellSearchError if the wrong number of matches is found.
+findRowCellMatches :: Maybe Int -> CellRunSearch a -> Int -> [ParsedHexCell]
+    -> Either [CellSearchError] [CellRunMatch a]
+findRowCellMatches mCount search rowId cellRow
+    | null errors = Right $ map ((,payload) . snd) matches
+    | otherwise = Left errors
+    where   toFind = fst search
+            payload = snd search
+            fLength = length toFind
+            possibleLocs = [0..(length cellRow - fLength)]
+            candidates = map toCandidate possibleLocs
+            toCandidate i = (i, take fLength $ drop i cellRow)
+            matches = filter (matchTokens toFind . snd) candidates
+            matchTokens find b = find == map (.cellToken) b
+            overlaps = filter ((fLength >= ) . uncurry (-) . bimap fst fst) $ zip (drop 1 matches) matches
+            overlapErrors = map ((\o -> OverlappingCellSearch { leRow = rowId, leCol = o}) . fst . fst) overlaps
+            countError Nothing _ = []
+            countError (Just c) mC | c == mC = []
+                                   | otherwise = [SearchCountWrongError {cpExpected = c, cpActual = mC}]
+            errors = countError mCount (length matches) ++ overlapErrors
+
+findCellMatches :: Maybe Int -> CellRunSearch a -> [[ParsedHexCell]]
+    -> Either [CellSearchError] [CellRunMatch a]
+findCellMatches mCount search cellRows 
+        | null errors = Right allMatches
+        | otherwise = Left errors
+    where   eRowMatches = zipWith (findRowCellMatches Nothing search) [0..1] cellRows
+            (errorLists, rowMatches) = partitionEithers eRowMatches
+            allMatches = concat rowMatches
+            countError Nothing _ = []
+            countError (Just c) mC | c == mC = []
+                                   | otherwise = [SearchCountWrongError {cpExpected = c, cpActual = mC}]
+            errors = countError mCount (length allMatches) ++ concat errorLists
+
+
 
 -- | Map parsed hex cells to @(cell, descriptor)@ pairs using a dictionary.
 --
