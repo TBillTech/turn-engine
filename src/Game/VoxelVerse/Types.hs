@@ -196,9 +196,9 @@ instance Monoid PropertyGroups where
 
 -- Naturally, "rendering" a view of the Voxel results in an array of Voxel objects 
 -- with Cube Coordinate positions
-type QRCoord = (Int, Int)
+type QRCoord = Primitives.CubeCoordinate Int
 -- We may choose to have a sparse set:
-type SparseHexVoxels = Map QRCoord Voxel
+type SparseVoxels = Map QRCoord Voxel
 
 -- Or perhaps more likely a dense array
 type FirstRowIndex = Int

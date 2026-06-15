@@ -59,16 +59,23 @@ module Game.VoxelVerse.Layout
     , makeDictionary
       -- * Errors
     , LayoutError (..)
+    , CellSearchError (..)
       -- * Parsed cells
     , ParsedHexCell (..)
       -- * Core operations
     , parseHexLayout
     , concatHexRows
     , mapHexLayout
+    , findRowCellMatches
+    , findRowMixedCellMatches
+    , findCellMatches
+    , findAllCellMatches
       -- * Bridge helpers
     , toCubeCoordinates
     , toCubeCoordinateTokens
+    , toPatch
     , hexLayoutToCoordinates
+    , hexLayoutPatchToCoordinates
     ) where
 
 import qualified Data.Map.Strict as Map
@@ -77,6 +84,8 @@ import Game.Core.Primitives
     , CubeCoordinateTokens (..)
     , HourHand
     , mkCubeCoordinate
+    , Hoist
+    , hoist
     )
 
 -- ---------------------------------------------------------------------------
@@ -188,16 +197,16 @@ data ParsedHexCell = ParsedHexCell
 --
 --   Returns @'Left' errors@ (accumulated) if 'strictWidth' is set and any row
 --   violates it; returns @'Right' cells@ otherwise.
-parseHexLayout :: LayoutSpec -> [Text] -> Either [[LayoutError]] [[ParsedHexCell]]
-parseHexLayout _    []   = Left [[EmptyLayout]]
+parseHexLayout :: LayoutSpec -> [Text] -> Either [LayoutError] [[ParsedHexCell]]
+parseHexLayout _    []   = Left [EmptyLayout]
 parseHexLayout spec rows =
     let indexed  = zip [0..] (map words rows)
         errors   = map (widthErrors spec) indexed
         cells    = map (rowToCells  spec) indexed
-    in  if not (all null errors) then Left errors else Right cells
+    in  if not (all null errors) then Left (concat errors) else Right cells
 
-concatHexRows :: Either [[LayoutError]] [[ParsedHexCell]] -> Either [LayoutError] [ParsedHexCell]
-concatHexRows = bimap concat concat
+concatHexRows :: Either [LayoutError] [[ParsedHexCell]] -> Either [LayoutError] [ParsedHexCell]
+concatHexRows = second concat
 
 widthErrors :: LayoutSpec -> (Int, [Text]) -> [LayoutError]
 widthErrors LayoutSpec{ strictWidth = Just w } (rowIdx, toks)
@@ -240,7 +249,11 @@ data CellSearchError
         { cpExpected :: Int -- ^ count of expected Cell Search matches
         , cpActual   :: Int -- ^ actual count of Cell Search matches
         }
+    | FailedParseError LayoutError
     deriving (Show, Eq)
+
+instance Hoist LayoutError CellSearchError where
+    hoist = FailedParseError
 
 -- | Find and track CellRunSearch on a row of ParsedHexCells
 --
@@ -260,7 +273,7 @@ findRowCellMatches (mCount, search) (rowId, cellRow)
             toCandidate i = (i, take fLength $ drop i cellRow)
             matches = filter (matchTokens toFind . snd) candidates
             matchTokens f b = f == map (.cellToken) b
-            overlaps = filter ((fLength >= ) . uncurry (-) . bimap fst fst) $ zip (drop 1 matches) matches
+            overlaps = filter ((fLength > ) . uncurry (-) . bimap fst fst) $ zip (drop 1 matches) matches
             overlapErrors = map ((\o -> OverlappingCellSearch { leRow = rowId, leCol = o}) . fst . fst) overlaps
             countError Nothing _ = []
             countError (Just c) mC | c == mC = []
@@ -279,9 +292,9 @@ findRowMixedCellMatches countSearches (rowId, cellRow)
             overlaps collisions [] = collisions
             overlaps collisions ((b,e):rest) = overlaps (curCollisions (b+e) rest ++ collisions) rest
             curCollisions _ [] = []
-            curCollisions e (block:rest) | fst block <= e = block:curCollisions e rest
+            curCollisions e (block:rest) | fst block < e = block:curCollisions e rest
                                          | otherwise = []
-            overlapErrors = map ((\o -> OverlappingCellSearch { leRow = rowId, leCol = o}) . fst) 
+            overlapErrors = map ((\o -> OverlappingCellSearch { leRow = rowId, leCol = o}) . fst)
                 $ overlaps [] blockTuples
             errors = concat errorLists ++ overlapErrors
 
@@ -352,17 +365,42 @@ toCubeCoordinateTokens
 toCubeCoordinateTokens orientation pairs =
     CubeCoordinateTokens orientation (Map.fromList (toCubeCoordinates pairs))
 
+type CubeCoordinateObj d = (CubeCoordinate Int, d)
+
 -- | Convenience combinator: parse rows, map tokens to descriptors, and
 --   return axial coordinate pairs.  Equivalent to:
 --
--- > parseHexLayout spec rows >>= mapHexLayout dict >>= pure . toCubeCoordinates
+-- > parseHexLayout spec rows >>= concatHexRows >>= mapHexLayout dict >>= pure . toCubeCoordinates
 hexLayoutToCoordinates
     :: LayoutSpec
     -> LayoutDictionary d
     -> [Text]
-    -> Either [LayoutError] [(CubeCoordinate Int, d)]
+    -> Either [LayoutError] [CubeCoordinateObj d]
 hexLayoutToCoordinates spec dict rows = do
     cells <- concatHexRows $ parseHexLayout spec rows
     pairs <- mapHexLayout dict cells
     pure (toCubeCoordinates pairs)
 
+toPatch :: LayoutDictionary d -> [CellRunMatch ([ParsedHexCell] -> [ParsedHexCell])]
+    -> Either [CellSearchError] [(CubeCoordinateObj d, CubeCoordinateObj d)]
+toPatch dict cellPatches = do
+    let applyPatch (cells, cellfn) = zip cells $ cellfn cells
+        patches = concatMap applyPatch cellPatches
+    before <- hoist $ mapHexLayout dict (map fst patches)
+    after <- hoist $ mapHexLayout dict (map snd patches)
+    pure $ zip (toCubeCoordinates before) (toCubeCoordinates after)
+
+-- | Convenience combinator: parse rows, find cell run matches, compute cell run patches, 
+--   map tokens to descriptors, and return axial coordinate pairs.  Equivalent to:
+--
+-- > hoist (parseHexLayout spec rows) >>= findAllCellMatches searches >>= pure . toPatch dict
+hexLayoutPatchToCoordinates
+    :: LayoutSpec
+    -> LayoutDictionary d
+    -> [Text]
+    -> [CellRunSearch ([ParsedHexCell] -> [ParsedHexCell])]
+    -> Either [CellSearchError] [(CubeCoordinateObj d, CubeCoordinateObj d)]
+hexLayoutPatchToCoordinates spec dict rows searches = do
+    cells <- hoist $ parseHexLayout spec rows
+    matches <- findAllCellMatches searches cells
+    toPatch dict matches

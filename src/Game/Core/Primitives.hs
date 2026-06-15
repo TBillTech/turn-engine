@@ -28,6 +28,8 @@ module Game.Core.Primitives
     , seedStreamStdGen
     , nextSeedStream
     , Context (..)
+    , Hoist
+    , hoist
     )
 where
 
@@ -294,3 +296,13 @@ instance Functor Context where
         , currentState = f ctx.currentState
         , planningState = f <$> ctx.planningState
         }
+
+class Hoist e1 e2 where
+    hoist :: e1 -> e2
+
+instance Hoist e1 e2 => Hoist [e1] [e2] where
+    hoist = map hoist
+
+instance Hoist e1 e2 => Hoist (Either e1 a) (Either e2 a) where
+    hoist = first hoist
+

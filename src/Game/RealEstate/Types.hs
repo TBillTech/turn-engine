@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies #-}
 module Game.RealEstate.Types
     ( PlayerDescription(..)
     , PlayerMove(..)
@@ -15,7 +16,8 @@ data PlayerMove = NoOpMove
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 newtype CensoredGameState = CensoredGameState GameState
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    deriving stock (Show, Eq, Generic)
+    deriving newtype (FromJSON, ToJSON)
 
 -- | Placeholder ruleset state for Real Estate.
 -- Expand with actual ruleset-specific state as the game is implemented.
