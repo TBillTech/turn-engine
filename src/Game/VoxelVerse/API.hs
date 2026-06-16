@@ -158,7 +158,8 @@ initialProjectionState gameState =
 -- * planningState = Nothing
 -- OR
 -- * planningState = makeMove (constructMoveFromTool appliedTool)
-computeNextGameState :: CoreVoxelVerseSession -> ToolApplication -> Either Text CoreVoxelVerseSession
+computeNextGameState :: CoreVoxelVerseSession -> ToolApplication Primitives.PropertySetHandle 
+    -> Either Text CoreVoxelVerseSession
 computeNextGameState session appliedTool =
     case session.vvContext.currentState of
     Core.CursedTreasureGame _ -> do
@@ -487,7 +488,7 @@ type SessionM a = RWST VoxelVersePlayerContext VoxelVerseDelta SessionStateType 
 -- applyTool is the more generic and high level mutation of the GameState which _entails_ makeMove 
 -- AND enumerateActivePlayerOptions AND hueristicHint. It even entails ViewPorts, since a ViewPort
 -- turns out to be simply another kind of Tool Application.
-applyTool :: CoreVoxelVerseSession -> ToolApplication
+applyTool :: CoreVoxelVerseSession -> ToolApplication Primitives.PropertySetHandle
   -> Either Text (CoreVoxelVerseSession, [VoxelVerseView])
 applyTool session toolApplication = updSession eMovedSession $ updViews originalPlayerSessions
     where
@@ -528,7 +529,7 @@ applyTool session toolApplication = updSession eMovedSession $ updViews original
                 ([], successes) -> Right successes
                 (errors, _) -> Left (Text.intercalate "\n" errors)
 
-applyToolM :: ToolApplication -> SessionM ()
+applyToolM :: ToolApplication Primitives.PropertySetHandle -> SessionM ()
 applyToolM toolApplication = do
   coreContext <- ask
   sessionState <- get
@@ -589,8 +590,8 @@ applyToolM toolApplication = do
     -> (VoxelVerseProjectionState -> Maybe projectionState)
     -> (interactionState -> VoxelVerseInteractionState)
     -> (projectionState -> VoxelVerseProjectionState)
-    -> (ToolApplication -> RWST (Primitives.Context rulesetCensoredState) VoxelVerseDelta (SessionState interactionState projectionState) (Either Text) ())
-    -> ToolApplication
+    -> (ToolApplication Primitives.PropertySetHandle -> RWST (Primitives.Context rulesetCensoredState) VoxelVerseDelta (SessionState interactionState projectionState) (Either Text) ())
+    -> ToolApplication Primitives.PropertySetHandle
     -> VoxelVersePlayerContext
     -> SessionStateType
     -> SessionM ()

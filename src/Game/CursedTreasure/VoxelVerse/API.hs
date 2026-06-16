@@ -50,6 +50,7 @@ import Game.CursedTreasure.VoxelVerse.Types
 import Game.VoxelVerse.Types
 import Game.Core.Primitives
 import Control.Monad.Trans.RWS.Strict (RWST, runRWST)
+import qualified Data.Map.Strict as Map (lookup)
 
 initialVoxelVerseState :: PlayerId -> CensoredGameState -> VoxelVerseState
 initialVoxelVerseState playerId gameState = undefined
@@ -58,7 +59,7 @@ initialVoxelVerseDelta :: CensoredGameState -> VoxelVerseDelta
 initialVoxelVerseDelta gameState = undefined
 
 initialInteractionState :: InteractionState
-initialInteractionState = InteractionState
+initialInteractionState = InteractionState { toolOptions = mempty}
 
 initialProjectionState :: ProjectionState
 initialProjectionState = ProjectionState
@@ -71,10 +72,49 @@ type SessionStateType = SessionState InteractionState ProjectionState
 
 type SessionM a = RWST VoxelVersePlayerContext VoxelVerseDelta SessionStateType (Either Text) a
 
-computeNextGameState :: InnerVoxelVerseSession -> ToolApplication -> Either Text InnerVoxelVerseSession
-computeNextGameState session tool = undefined
+toPlayerMove :: InnerVoxelVerseSession -> ToolApplication PropertySet -> Either Text PlayerMove
+toPlayerMove = undefined
 
-applyToolM :: ToolApplication -> SessionM ()
+lookupToolPropertySet :: InnerVoxelVersePlayerSession -> ToolApplication PropertySetHandle
+    -> Either Text (ToolApplication PropertySet)
+lookupToolPropertySet session tool = maybeToRight eMsg updTool 
+    where   toolContext = session.playerInteractionState.toolOptions
+            eMsg = "Could not find tool handle " <> show tool.appliedTool <> " in previous Tool Options."
+            updTool = do
+                propertySet <- Map.lookup tool.appliedTool toolContext
+                pure $ tool { appliedTool = propertySet }
+
+isGameMove :: InnerVoxelVersePlayerSession -> ToolApplication PropertySet -> Bool
+isGameMove session tool = not isFingerTool || notToolSelected selectedSets
+    where   toolName = propertySetLookup "toolName" tool.appliedTool
+            selectedSets = lookupStateVoxels (selectionLookupFn tool.toolLayer tool.appliedSelection) session.playerModel 
+            isFingerTool = toolName == TextProperty "finger"
+            notToolSelected [(_, voxel)] = NullProperty == propertySetLookup "toolName" voxel
+            notToolSelected _ = False -- For Cursed Treasure, user can only select on item at a time.
+
+makeMoveNextGameState :: InnerVoxelVerseSession -> ToolApplication PropertySet -> Either Text InnerVoxelVerseSession
+makeMoveNextGameState session tool = undefined
+
+updateInteractionState :: InnerVoxelVerseSession -> ToolApplication PropertySet -> Either Text InnerVoxelVerseSession
+updateInteractionState session tool = undefined
+
+getActivePlayerSession :: InnerVoxelVerseSession -> Either Text (PlayerId, InnerVoxelVersePlayerSession)
+getActivePlayerSession session = (playerId, ) <$> maybeToRight eMsg mInnerSession
+    where   playerId = session.vvContext.currentState.activePlayer
+            eMsg = "Could not find player " <> show playerId <> " in players."
+            mInnerSession = do
+                let sessions = zip session.vvPlayerSessions session.vvContext.currentState.players
+                fst . fst <$> uncons (filter ((playerId ==) . (.player.playerId) . snd) sessions)
+
+computeNextGameState :: InnerVoxelVerseSession -> ToolApplication PropertySetHandle -> Either Text InnerVoxelVerseSession
+computeNextGameState session toolHandle = do
+    playerSession <- snd <$> getActivePlayerSession session
+    tool <- lookupToolPropertySet playerSession toolHandle
+    let     updateFn | isGameMove playerSession tool = makeMoveNextGameState
+                     | otherwise = updateInteractionState
+    updateFn session tool
+
+applyToolM :: ToolApplication PropertySetHandle -> SessionM ()
 applyToolM _toolApplication = do
     lift (Left "applyToolM not implemented yet")
 

@@ -24,8 +24,11 @@ Design notes:
 module Game.VoxelVerse.Types
     (
         VoxelVerseState (..),
+        lookupStateVoxels,
+        selectionLookupFn,
+        VoxelLayerState (..),
         VoxelVerseDelta,
-        ToolApplication,
+        ToolApplication (..),
         VoxelOption (..),
         VoxelBlock,
         VoxelVerseInteractionState (..),
@@ -42,10 +45,10 @@ import qualified Game.ArtOfWar.VoxelVerse.Types as ArtOfWar
 import qualified Game.CursedTreasure.VoxelVerse.Types as CursedTreasure
 import qualified Game.FogOfBattle.VoxelVerse.Types as FogOfBattle
 import qualified Game.RealEstate.VoxelVerse.Types as RealEstate
-import qualified Game.Core.Primitives as Primitives
+import Game.Core.Primitives
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Relude.Extra (maximum1, minimum1)     
+import Relude.Extra (maximum1, minimum1)
 
 
 data VoxelVerseInteractionState
@@ -60,83 +63,6 @@ data VoxelVerseProjectionState
     | ArtOfWarVoxelVerseProjectionState ArtOfWar.ProjectionState
     | RealEstateVoxelVerseProjectionState RealEstate.ProjectionState
 
--- **** Plain Voxel definition ****
--- We take it that a property name is a Text, and we define the property value as a 
--- limited set of options:
-data VoxelPropertyValue = NullProperty
-    | TrueProperty
-    | IntProperty Int
-    | DoubleProperty Double
-    | TextProperty Text
-    | ListProperty [VoxelPropertyValue]
-    | KeyValueProperty PropertySet
-
--- Then the key-value labeled set of properties is nothing but a Text to VoxelPropertyValue map:
-newtype PropertySet = PropertySet (Map Text VoxelPropertyValue)
-
-propertySetUnion :: PropertySet -> PropertySet -> PropertySet
-propertySetUnion (PropertySet left) (PropertySet right) = PropertySet (left <> right)
-
-propertySetInsert :: Text -> VoxelPropertyValue -> PropertySet -> PropertySet
-propertySetInsert key value (PropertySet properties) = PropertySet (Map.insert key value properties)
-
-propertySetDifference :: PropertySet -> PropertySet -> PropertySet
-propertySetDifference (PropertySet left) (PropertySet right) = PropertySet (Map.difference left right)
-
-propertySetDelete :: Text -> PropertySet -> PropertySet
-propertySetDelete key (PropertySet properties) = PropertySet (Map.delete key properties)
-
--- In Haskell, data structures are shared, so there will be no problem
--- keeping the PropertySet directly in the Voxel even multiplied by millions of references, 
--- When creating the view to be serialized, to resolve dereferencing, we will
--- remap the layers to contain handles which can be used to look up a PropertySet.
--- This does imply we should try to assign the same PropertySet to voxels over and over, not
--- rebuild PropertySets over and over, when possible. To accellerate searching for logically
--- identical Voxels, producing the view will require the PropertySetHashmap.
-
--- Notionally, a HexVoxel is defined like the following data structure:
--- data HexVoxel = HexVoxel {
---     q :: Int, -- Cube Coordinate q
---     r :: Int, -- Cube Coordinate r
---     b :: Int, -- The Bottom altitude of the hex in z
---     t :: Int, -- The Top altitude of the hex in z
---     enabled :: Bool, -- Whether the HexVoxel is enabled for the current Tool
---     -- And then each voxel has to contain an arbitrary set of additional properties
---     properties :: PropertySet
--- }
--- HOWEVER, "rendering" a view is obviously going to be walking the indexes, or presenting the voxels
--- sparsely like in the SparseHexVoxels defined below, so we don't need to track q and r within the
--- HexVoxel itself.  Moreover, the bottom altitude and the top altitude are conditionally needed for 
--- hexes NOT simply on the 0 z plane. Moreover, the HexVoxel being _enabled_ is ALSO a property that 
--- properly only belongs to some hex voxels, while most others can be disabled by default. Since enabled 
--- with value (TrueProperty) can be handled as a mutation of the PropertySet, it turns
--- out nothing remains in the HexVoxel data structure _except_ the properties:
--- type HexVoxel = PropertySet
--- And since there is nothing at this point distinguishing it from an arbitrary geometry Voxel:
-type Voxel = PropertySet
-
--- **** VIEW Voxel Representation ****
--- We envision for this architecture that the number of HexVoxel objects could be grids of 
--- perhaps 3600 by 3600. Thus the HexVoxel _view_ should be lightweight versus properties, and we
--- should be able to compress it using property handles. So we define a property set handle
--- which is basically and notionally close to an index into an array of property sets:
-type PropertySetHandle = Int
-
--- Now each Voxel in the _view_ (which gets serialized) should not literally contain a PropertySet 
--- because many terrain voxels or voxels part of a larger structure will have identical property sets. 
--- So we need another map to intern the property sets using the PropertySetHandle when constructing the view:
-newtype PropertySets = PropertySets (Map PropertySetHandle PropertySet)
-
--- Morover, when in order to effciently compare a Voxel with others and to detect identical voxels,
--- we will need to map a property set hash back to candidate equal PropertySetHandles:
-type PropertySetHash = Int
-newtype PropertySetHashmap = PropertySetHashedHandles (Map PropertySetHash [PropertySetHandle])
-
--- **** PropertySet Construction ****
--- Now to build up useful PropertySets, we will wish to compose named property groups.
--- So for the convenience of PropertySet constructions we define:
-type PropertyGroupName = Text
-newtype PropertyGroups = PropertyGroups (Map PropertyGroupName PropertySet)
 
 -- And so ultimately we construct compressed property sets by composing property concepts.
 -- ConceptIs carries the idea that we specialize the concept to say "it is also this".
@@ -176,7 +102,7 @@ substituteConceptGroups (PropertyGroups groups) (PropertyGroups newGroups) = map
 newtype NamedPropertyOps concept = NamedPropertyOps [(Text, ConceptOperation concept)]
 
 instance Semigroup (NamedPropertyOps concept) where
-    NamedPropertyOps left <> NamedPropertyOps right = NamedPropertyOps 
+    NamedPropertyOps left <> NamedPropertyOps right = NamedPropertyOps
         $ left ++ right
 
 instance Monoid (NamedPropertyOps concept) where
@@ -196,7 +122,7 @@ instance Monoid PropertyGroups where
 
 -- Naturally, "rendering" a view of the Voxel results in an array of Voxel objects 
 -- with Cube Coordinate positions
-type QRCoord = Primitives.CubeCoordinate Int
+type QRCoord = CubeCoordinate Int
 -- We may choose to have a sparse set:
 type SparseVoxels = Map QRCoord Voxel
 
@@ -315,8 +241,12 @@ data VoxelLayerState = VoxelLayerState {
 data VoxelVerseState = VoxelVerseState {
     propertyGroups :: PropertyGroups,
     voxelLayers :: [VoxelLayerState],
-    thisPlayer :: Primitives.PlayerId
+    thisPlayer :: PlayerId
 }
+
+lookupStateVoxels :: (Int -> VoxelBlock Voxel -> [(QRCoord, Voxel)]) -> VoxelVerseState -> [(QRCoord, Voxel)]
+lookupStateVoxels lookupFn vvState = concatMap lookup vvState.voxelLayers
+    where lookup vls = lookupFn vls.presentationLayer vls.voxels
 
 data VoxelVerseDelta = VoxelVerseDelta {
     newGroups :: PropertyGroups,
@@ -339,15 +269,43 @@ instance Monoid VoxelVerseDelta where
         }
 
 -- For the user to actually apply a tool though, we need to define a selection of Voxels. There are 
--- arguments to be made for both sparse selections AND block selections, so support both: 
-data ToolSelection = SparseToolSelection (Set QRCoord)
-    | DenseToolSelection FirstColumnIndex [(FirstRowIndex, Int)]
+-- arguments to be made for both sparse selections AND block selections, so support both. Note that
+-- the (Int, Int) payload is intended to carry (top, bottom) range for verticality.
+data VoxelSpecifier = NoVoxelSpecifier 
+    | VerticalVoxelSpecifier Int Int 
+    | PropertyVoxelSpecifier Text Text
+    | ANDVoxelSpecifier VoxelSpecifier VoxelSpecifier
+data VoxelSelection = SparseSelection (Map QRCoord VoxelSpecifier)
+    | DenseSelection FirstRowIndex [(FirstColumnIndex, [VoxelSpecifier])]
+
+-- | This function manufactures the lookupFn for the lookupStateVoxels from a target layer and a
+--   voxel selection.  In the future, this may need to be enhanced for Voxels that contain multiple
+--   voxels (which is, a voxel with a "voxels" list property). It also will probably need to be
+--   enhanced for VoxelSpecifier payload, since the VoxelSelection technically supports them.
+selectionLookupFn :: Int -> VoxelSelection -> Int -> VoxelBlock Voxel -> [(QRCoord, Voxel)]
+selectionLookupFn matchLayer (SparseSelection locations) layerId block
+    | matchLayer /= layerId = []
+    | otherwise = concat (zipWith matchRow [(fst block)..] (snd block))
+    where   matchRow rowId (firstColumn, voxels) = filter matchVoxel
+                $ zipWith (curry (first (uncurry mkCubeCoordinate . (, rowId)))) [firstColumn..] voxels
+            matchVoxel (qrCoord, _) = qrCoord `Map.member` locations
+selectionLookupFn matchLayer (DenseSelection firstRowId rows) layerId block
+    | matchLayer /= layerId = []
+    | otherwise = concat (zipWith matchRow [(fst block)..] (snd block))
+    where   matchRow rowId (firstColumn, voxels) = filter matchVoxel
+                $ zipWith (curry (first (uncurry mkCubeCoordinate . (, rowId)))) [firstColumn..] voxels
+            matchVoxel (qrCoord, _) = fromMaybe False $ wantQR (toPair qrCoord)
+            wantQR :: (Int, Int) -> Maybe Bool
+            wantQR (q, r) = do
+                row <- uncons $ drop (r - firstRowId) rows
+                _ <- uncons $ drop (q - (fst . fst $ row)) (snd . fst $ row)
+                pure True
 
 -- To fully apply a tool then is captured in a ToolApplication:
-data ToolApplication = ToolApplication {
+data ToolApplication toolType = ToolApplication {
     toolLayer :: Int,
-    appliedTool :: SelectedTool,
-    appliedSelection :: ToolSelection
+    appliedTool :: toolType,
+    appliedSelection :: VoxelSelection
 }
 
 -- It is also important for large Game Universes, to be able for downstream logic to specify an 
@@ -385,13 +343,13 @@ data VoxelLayerView = VoxelLayerView {
 -- createVoxelVerseView, the resulting VoxelVerseView will be generated and passed along to
 -- the downstream logic. This resembles the VoxelVerse data structure in most ways, but is
 -- organized for downstream use and potentially filtered by the createVoxelVerseView function.
-data VoxelVerseView = VoxelVerseView 
-    { viewingPlayer :: Primitives.PlayerId
+data VoxelVerseView = VoxelVerseView
+    { viewingPlayer :: PlayerId
     , propertyGroups :: PropertyGroups
     , propertySets :: PropertySets
-    , toolApplication :: ToolApplication
+    , toolApplication :: ToolApplication PropertySetHandle
     , voxelLayers :: [VoxelLayerView]
-    } 
+    }
 
 -- Generally speaking, the unrestricted Core.GameState needs to be preserved and kept for future
 -- calls to the underlying API, and for correct GameState computations. It may also be necessary to
@@ -421,13 +379,13 @@ data SessionState interactionType projectionType = SessionState
 --   'NoVoxel'.
 --
 --   Duplicate coordinates follow 'Map.fromList' semantics: the last entry wins.
-coordinatesToVoxelBlock :: [(Primitives.CubeCoordinate Int, VoxelOption)] -> VoxelBlock VoxelOption
+coordinatesToVoxelBlock :: [(CubeCoordinate Int, VoxelOption)] -> VoxelBlock VoxelOption
 coordinatesToVoxelBlock [] = (0, [])
 coordinatesToVoxelBlock pairs =
     (minR, map buildRow [minR .. maxR])
   where
     cellMap = Map.fromList
-        [ (Primitives.toPair coord, voxel)
+        [ (toPair coord, voxel)
         | (coord, voxel) <- pairs
         ]
     qs = map fst (Map.keys cellMap)

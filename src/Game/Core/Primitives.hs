@@ -30,6 +30,18 @@ module Game.Core.Primitives
     , Context (..)
     , Hoist
     , hoist
+    , PropertySet (..)
+    , PropertySetHandle
+    , VoxelPropertyValue (..)
+    , propertySetUnion
+    , propertySetDifference
+    , propertySetInsert
+    , propertySetDelete
+    , propertySetLookup
+    , Voxel
+    , PropertySets (..)
+    , PropertySetHashmap (..)
+    , PropertyGroups (..)
     )
 where
 
@@ -306,3 +318,89 @@ instance Hoist e1 e2 => Hoist [e1] [e2] where
 instance Hoist e1 e2 => Hoist (Either e1 a) (Either e2 a) where
     hoist = first hoist
 
+-- **** Plain Voxel definition ****
+-- We take it that a property name is a Text, and we define the property value as a 
+-- limited set of options:
+data VoxelPropertyValue = NullProperty
+    | TrueProperty
+    | IntProperty Int
+    | DoubleProperty Double
+    | TextProperty Text
+    | ListProperty [VoxelPropertyValue]
+    | KeyValueProperty PropertySet
+    deriving (Show, Eq, Generic)
+
+-- Then the key-value labeled set of properties is nothing but a Text to VoxelPropertyValue map:
+newtype PropertySet = PropertySet (Map Text VoxelPropertyValue)
+    deriving (Show, Eq, Generic)
+
+propertySetUnion :: PropertySet -> PropertySet -> PropertySet
+propertySetUnion (PropertySet left) (PropertySet right) = PropertySet (left <> right)
+
+propertySetInsert :: Text -> VoxelPropertyValue -> PropertySet -> PropertySet
+propertySetInsert key value (PropertySet properties) = PropertySet (Map.insert key value properties)
+
+propertySetDifference :: PropertySet -> PropertySet -> PropertySet
+propertySetDifference (PropertySet left) (PropertySet right) = PropertySet (Map.difference left right)
+
+propertySetDelete :: Text -> PropertySet -> PropertySet
+propertySetDelete key (PropertySet properties) = PropertySet (Map.delete key properties)
+
+propertySetLookup :: Text -> PropertySet -> VoxelPropertyValue
+propertySetLookup key (PropertySet properties) = fromMaybe NullProperty $ Map.lookup key properties
+
+-- In Haskell, data structures are shared, so there will be no problem
+-- keeping the PropertySet directly in the Voxel even multiplied by millions of references, 
+-- When creating the view to be serialized, to resolve dereferencing, we will
+-- remap the layers to contain handles which can be used to look up a PropertySet.
+-- This does imply we should try to assign the same PropertySet to voxels over and over, not
+-- rebuild PropertySets over and over, when possible. To accellerate searching for logically
+-- identical Voxels, producing the view will require the PropertySetHashmap.
+
+-- Notionally, a HexVoxel is defined like the following data structure:
+-- data HexVoxel = HexVoxel {
+--     q :: Int, -- Cube Coordinate q
+--     r :: Int, -- Cube Coordinate r
+--     b :: Int, -- The Bottom altitude of the hex in z
+--     t :: Int, -- The Top altitude of the hex in z
+--     enabled :: Bool, -- Whether the HexVoxel is enabled for the current Tool
+--     -- And then each voxel has to contain an arbitrary set of additional properties
+--     properties :: PropertySet
+-- }
+-- HOWEVER, "rendering" a view is obviously going to be walking the indexes, or presenting the voxels
+-- sparsely like in the SparseHexVoxels defined below, so we don't need to track q and r within the
+-- HexVoxel itself.  Moreover, the bottom altitude and the top altitude are conditionally needed for 
+-- hexes NOT simply on the 0 z plane. Moreover, the HexVoxel being _enabled_ is ALSO a property that 
+-- properly only belongs to some hex voxels, while most others can be disabled by default. Since enabled 
+-- with value (TrueProperty) can be handled as a mutation of the PropertySet, it turns
+-- out nothing remains in the HexVoxel data structure _except_ the properties:
+-- type HexVoxel = PropertySet
+-- And since there is nothing at this point distinguishing it from an arbitrary geometry Voxel:
+type Voxel = PropertySet
+
+-- **** VIEW Voxel Representation ****
+-- We envision for this architecture that the number of HexVoxel objects could be grids of 
+-- perhaps 3600 by 3600. Thus the HexVoxel _view_ should be lightweight versus properties, and we
+-- should be able to compress it using property handles. So we define a property set handle
+-- which is basically and notionally close to an index into an array of property sets:
+type PropertySetHandle = Int
+
+-- Now each Voxel in the _view_ (which gets serialized) should not literally contain a PropertySet 
+-- because many terrain voxels or voxels part of a larger structure will have identical property sets. 
+-- So we need another map to intern the property sets using the PropertySetHandle when constructing the view:
+newtype PropertySets = PropertySets (Map PropertySetHandle PropertySet)
+    deriving (Show, Eq, Generic)
+
+-- Morover, when in order to effciently compare a Voxel with others and to detect identical voxels,
+-- we will need to map a property set hash back to candidate equal PropertySetHandles:
+type PropertySetHash = Int
+newtype PropertySetHashmap = PropertySetHashedHandles (Map PropertySetHash [PropertySetHandle])
+    deriving stock (Show, Eq, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- **** PropertySet Construction ****
+-- Now to build up useful PropertySets, we will wish to compose named property groups.
+-- So for the convenience of PropertySet constructions we define:
+type PropertyGroupName = Text
+newtype PropertyGroups = PropertyGroups (Map PropertyGroupName PropertySet)
+    deriving stock (Show, Eq, Generic)
