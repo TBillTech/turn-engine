@@ -38,10 +38,14 @@ module Game.Core.Primitives
     , propertySetInsert
     , propertySetDelete
     , propertySetLookup
+    , propertyTryLookup
     , Voxel
     , PropertySets (..)
     , PropertySetHashmap (..)
     , PropertyGroups (..)
+    , VoxelSpecifier (..)
+    , VoxelSelection (..)
+    , ToolApplication (..)
     )
 where
 
@@ -248,11 +252,11 @@ radiusTwoCubeCoordinates =
     ]
 
 adjacentCubeCoordinates :: Real c => CubeCoordinate c -> [CubeCoordinate c]
-adjacentCubeCoordinates (CubeCoordinate (q, r)) = uncurry mkCubeCoordinate . bimap (+q) (+r) 
+adjacentCubeCoordinates (CubeCoordinate (q, r)) = uncurry mkCubeCoordinate . bimap (+q) (+r)
     <$> radiusOneCubeCoordinates
 
 cubeCoordinateDistance :: Real c => CubeCoordinate c -> CubeCoordinate c -> Double
-cubeCoordinateDistance (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) = 
+cubeCoordinateDistance (CubeCoordinate (q_a, r_a)) (CubeCoordinate (q_b, r_b)) =
     sqrt (realToFrac $ dq*dq + dq*dr + dr*dr)
     where   dq = q_a - q_b
             dr = r_a - r_b
@@ -303,7 +307,7 @@ data Context stateType = Context
 
 instance Functor Context where
     fmap :: (a -> b) -> Context a -> Context b
-    fmap f ctx = Context 
+    fmap f ctx = Context
         { previousCommittedState = f <$> ctx.previousCommittedState
         , currentState = f ctx.currentState
         , planningState = f <$> ctx.planningState
@@ -330,9 +334,31 @@ data VoxelPropertyValue = NullProperty
     | KeyValueProperty PropertySet
     deriving (Show, Eq, Generic)
 
+instance Ord VoxelPropertyValue where
+    NullProperty `compare` NullProperty = False `compare` False
+    NullProperty `compare` _ = False `compare` True
+    _ `compare` NullProperty = True `compare` False
+    TrueProperty `compare` TrueProperty = True `compare` True
+    _ `compare` TrueProperty = False `compare` True
+    TrueProperty `compare` _ = True `compare` False
+    (IntProperty a) `compare` (IntProperty b) = a `compare` b
+    (DoubleProperty a) `compare` (IntProperty b) = a `compare` fromIntegral b
+    (IntProperty a) `compare` (DoubleProperty b) = fromIntegral a `compare` b
+    (IntProperty _) `compare` _ = False `compare` True
+    (DoubleProperty _) `compare` _ = False `compare` True
+    _ `compare` (IntProperty _) = True `compare` False
+    _ `compare` (DoubleProperty _) = True `compare` False
+    (TextProperty a) `compare` (TextProperty b) = a `compare` b
+    (TextProperty _) `compare` _ = False `compare` True
+    _ `compare` (TextProperty _) = True `compare` False
+    (ListProperty a) `compare` (ListProperty b) = a `compare` b
+    (ListProperty _) `compare` _ = False `compare` True
+    _ `compare` (ListProperty _) = True `compare` False
+    (KeyValueProperty a) `compare` (KeyValueProperty b) = a `compare` b
+
 -- Then the key-value labeled set of properties is nothing but a Text to VoxelPropertyValue map:
 newtype PropertySet = PropertySet (Map Text VoxelPropertyValue)
-    deriving (Show, Eq, Generic)
+    deriving (Ord, Show, Eq, Generic)
 
 propertySetUnion :: PropertySet -> PropertySet -> PropertySet
 propertySetUnion (PropertySet left) (PropertySet right) = PropertySet (left <> right)
@@ -348,6 +374,10 @@ propertySetDelete key (PropertySet properties) = PropertySet (Map.delete key pro
 
 propertySetLookup :: Text -> PropertySet -> VoxelPropertyValue
 propertySetLookup key (PropertySet properties) = fromMaybe NullProperty $ Map.lookup key properties
+
+propertyTryLookup :: Text -> Maybe PropertySet -> VoxelPropertyValue
+propertyTryLookup key (Just (PropertySet properties)) = fromMaybe NullProperty $ Map.lookup key properties
+propertyTryLookup _ Nothing = NullProperty
 
 -- In Haskell, data structures are shared, so there will be no problem
 -- keeping the PropertySet directly in the Voxel even multiplied by millions of references, 
@@ -404,3 +434,27 @@ newtype PropertySetHashmap = PropertySetHashedHandles (Map PropertySetHash [Prop
 type PropertyGroupName = Text
 newtype PropertyGroups = PropertyGroups (Map PropertyGroupName PropertySet)
     deriving stock (Show, Eq, Generic)
+
+-- For the user to actually apply a tool though, we need to define a selection of Voxels. There are 
+-- arguments to be made for both sparse selections AND block selections, so support both. Note that
+-- the (Int, Int) payload is intended to carry (top, bottom) range for verticality.
+data VoxelSpecifier = NoVoxelSpecifier 
+    | VerticalVoxelSpecifier Int Int 
+    | PropertyVoxelSpecifier Text
+    | IndexVoxelSpecifier Int
+    | ANDVoxelSpecifier VoxelSpecifier VoxelSpecifier
+    deriving (Show, Eq, Generic)
+type VoxelLayerIndex = Int
+type FirstRowIndex = Int
+type FirstColumnIndex = Int
+data VoxelSelection = SparseSelection VoxelLayerIndex (Map (CubeCoordinate Int) VoxelSpecifier)
+    | DenseSelection VoxelLayerIndex FirstRowIndex [(FirstColumnIndex, [VoxelSpecifier])]
+    deriving (Show, Eq, Generic)
+
+-- To fully apply a tool then is captured in a ToolApplication:
+data ToolApplication = ToolApplication {
+    toolLayer :: Int,
+    appliedTool :: (CubeCoordinate Int, VoxelSpecifier),
+    appliedSelection :: VoxelSelection
+} deriving (Show, Eq, Generic)
+

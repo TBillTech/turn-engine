@@ -40,10 +40,10 @@ type SessionStateType = SessionState InteractionState ProjectionState
 
 type SessionM a = RWST VoxelVersePlayerContext VoxelVerseDelta SessionStateType (Either Text) a
 
-computeNextGameState :: InnerVoxelVerseSession -> ToolApplication PropertySetHandle -> Either Text InnerVoxelVerseSession
+computeNextGameState :: InnerVoxelVerseSession -> ToolApplication -> Either Text InnerVoxelVerseSession
 computeNextGameState session tool = undefined
 
-applyToolM :: ToolApplication PropertySetHandle -> SessionM ()
+applyToolM :: ToolApplication -> SessionM ()
 applyToolM _toolApplication = do
     lift (Left "applyToolM not implemented yet")
 

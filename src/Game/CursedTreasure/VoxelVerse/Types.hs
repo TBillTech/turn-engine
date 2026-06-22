@@ -4,13 +4,15 @@ module Game.CursedTreasure.VoxelVerse.Types
     )
 where
 
+import Game.CursedTreasure.Types
 import Game.Core.Primitives
 
 import Data.Aeson (FromJSON, ToJSON)
 
 -- | Placeholder VoxelVerse interaction state for Cursed Treasure.
 data InteractionState = InteractionState {
-    toolOptions :: Map PropertySetHandle PropertySet
+    currentToolChoices :: ToolApplication,
+    enumeratedPlayerMoves :: [PlayerMove]
 } deriving (Show, Eq, Generic)
 
 -- | Placeholder VoxelVerse projection state for Cursed Treasure.

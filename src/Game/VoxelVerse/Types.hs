@@ -28,6 +28,7 @@ module Game.VoxelVerse.Types
         selectionLookupFn,
         VoxelLayerState (..),
         VoxelVerseDelta,
+        VoxelSelection (..),
         ToolApplication (..),
         VoxelOption (..),
         VoxelBlock,
@@ -193,7 +194,7 @@ hudPresentationLayer = 0
 -- Usually, we imagine the Player Legend, Information, and Meta-Tool HUD will be layer 0. 
 -- In addition, for every layer, we define a concept called a tool. The idea is that a user
 -- _always_ has a currently active tool. Even when the player "has no tool" we imagine that the
--- player has the "hand" tool equipped. Matching this concept, we dub all voxels that can be 
+-- player has the "finger" tool equipped. Matching this concept, we dub all voxels that can be 
 -- manipulated by the tool to be valid sockets.  So for the currently equipped tool, the set of valid 
 -- sockets is exactly the set of voxels with the property ("enabled", TrueProperty).
 -- Now since the PropertySet is already a nicely expressive way to represent an arbitrary
@@ -268,28 +269,18 @@ instance Monoid VoxelVerseDelta where
         , voxelDeltas = mempty
         }
 
--- For the user to actually apply a tool though, we need to define a selection of Voxels. There are 
--- arguments to be made for both sparse selections AND block selections, so support both. Note that
--- the (Int, Int) payload is intended to carry (top, bottom) range for verticality.
-data VoxelSpecifier = NoVoxelSpecifier 
-    | VerticalVoxelSpecifier Int Int 
-    | PropertyVoxelSpecifier Text Text
-    | ANDVoxelSpecifier VoxelSpecifier VoxelSpecifier
-data VoxelSelection = SparseSelection (Map QRCoord VoxelSpecifier)
-    | DenseSelection FirstRowIndex [(FirstColumnIndex, [VoxelSpecifier])]
-
 -- | This function manufactures the lookupFn for the lookupStateVoxels from a target layer and a
 --   voxel selection.  In the future, this may need to be enhanced for Voxels that contain multiple
 --   voxels (which is, a voxel with a "voxels" list property). It also will probably need to be
 --   enhanced for VoxelSpecifier payload, since the VoxelSelection technically supports them.
-selectionLookupFn :: Int -> VoxelSelection -> Int -> VoxelBlock Voxel -> [(QRCoord, Voxel)]
-selectionLookupFn matchLayer (SparseSelection locations) layerId block
+selectionLookupFn :: VoxelSelection -> Int -> VoxelBlock Voxel -> [(QRCoord, Voxel)]
+selectionLookupFn (SparseSelection matchLayer locations) layerId block
     | matchLayer /= layerId = []
     | otherwise = concat (zipWith matchRow [(fst block)..] (snd block))
     where   matchRow rowId (firstColumn, voxels) = filter matchVoxel
                 $ zipWith (curry (first (uncurry mkCubeCoordinate . (, rowId)))) [firstColumn..] voxels
             matchVoxel (qrCoord, _) = qrCoord `Map.member` locations
-selectionLookupFn matchLayer (DenseSelection firstRowId rows) layerId block
+selectionLookupFn (DenseSelection matchLayer firstRowId rows) layerId block
     | matchLayer /= layerId = []
     | otherwise = concat (zipWith matchRow [(fst block)..] (snd block))
     where   matchRow rowId (firstColumn, voxels) = filter matchVoxel
@@ -301,12 +292,6 @@ selectionLookupFn matchLayer (DenseSelection firstRowId rows) layerId block
                 _ <- uncons $ drop (q - (fst . fst $ row)) (snd . fst $ row)
                 pure True
 
--- To fully apply a tool then is captured in a ToolApplication:
-data ToolApplication toolType = ToolApplication {
-    toolLayer :: Int,
-    appliedTool :: toolType,
-    appliedSelection :: VoxelSelection
-}
 
 -- It is also important for large Game Universes, to be able for downstream logic to specify an 
 -- optional "orthographic" viewport to enable focusing, limiting, and even zooming in or out of the game world.
@@ -347,7 +332,7 @@ data VoxelVerseView = VoxelVerseView
     { viewingPlayer :: PlayerId
     , propertyGroups :: PropertyGroups
     , propertySets :: PropertySets
-    , toolApplication :: ToolApplication PropertySetHandle
+    , toolApplication :: ToolApplication
     , voxelLayers :: [VoxelLayerView]
     }
 
