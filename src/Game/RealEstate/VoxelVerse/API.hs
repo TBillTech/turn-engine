@@ -40,7 +40,7 @@ type SessionStateType = SessionState InteractionState ProjectionState
 
 type SessionM a = RWST VoxelVersePlayerContext VoxelVerseDelta SessionStateType (Either Text) a
 
-computeNextGameState :: InnerVoxelVerseSession -> ToolApplication -> Either Text InnerVoxelVerseSession
+computeNextGameState :: ToolApplication -> InnerVoxelVerseSession -> Either Text InnerVoxelVerseSession
 computeNextGameState session tool = undefined
 
 applyToolM :: ToolApplication -> SessionM ()

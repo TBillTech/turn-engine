@@ -170,7 +170,7 @@ computeNextGameState session appliedTool =
         toCursedTreasureInteractionState
         toCursedTreasureProjectionState
         session
-      movedSession <- CursedTreasure.computeNextGameState downSession appliedTool
+      movedSession <- CursedTreasure.computeNextGameState appliedTool downSession
       pure $ convertSessionUp
         Core.CursedTreasureGame
         Core.CursedTreasureCensoredGameState
@@ -185,7 +185,7 @@ computeNextGameState session appliedTool =
         toFogOfBattleInteractionState
         toFogOfBattleProjectionState
         session
-      movedSession <- FogOfBattle.computeNextGameState downSession appliedTool
+      movedSession <- FogOfBattle.computeNextGameState appliedTool downSession
       pure $ convertSessionUp
         Core.FogOfBattleGame
         Core.FogOfBattleCensoredGameState
@@ -200,7 +200,7 @@ computeNextGameState session appliedTool =
         toArtOfWarInteractionState
         toArtOfWarProjectionState
         session
-      movedSession <- ArtOfWar.computeNextGameState downSession appliedTool
+      movedSession <- ArtOfWar.computeNextGameState appliedTool downSession
       pure $ convertSessionUp
         Core.ArtOfWarGame
         Core.ArtOfWarCensoredGameState
@@ -215,7 +215,7 @@ computeNextGameState session appliedTool =
         toRealEstateInteractionState
         toRealEstateProjectionState
         session
-      movedSession <- RealEstate.computeNextGameState downSession appliedTool
+      movedSession <- RealEstate.computeNextGameState appliedTool downSession
       pure $ convertSessionUp
         Core.RealEstateGame
         Core.RealEstateCensoredGameState

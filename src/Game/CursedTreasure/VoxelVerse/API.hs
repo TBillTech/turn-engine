@@ -84,27 +84,26 @@ data DecodedTool = DecodedTool
 pushButtonDecoder :: DecodedTool -> PlayerMove
 pushButtonDecoder dTool = undefined
 
-pushButtonEncoder :: InnerVoxelVersePlayerSession -> VoxelSelection
-pushButtonEncoder session = undefined
-    where   moves = session.playerInteractionState.enumeratedPlayerMoves
-
+pushButtonEncoder :: SessionStateType -> VoxelSelection
+pushButtonEncoder st = undefined
+    where   moves = st.voxelVerseInteractionState.enumeratedPlayerMoves
 
 jeepDecoder :: DecodedTool -> PlayerMove
 jeepDecoder dTool = undefined
 
-jeepEncoder :: InnerVoxelVersePlayerSession -> VoxelSelection
+jeepEncoder :: SessionStateType -> VoxelSelection
 jeepEncoder = undefined
 
 clueDecoder :: DecodedTool -> PlayerMove
 clueDecoder dTool = undefined
 
-clueEncoder :: InnerVoxelVersePlayerSession -> VoxelSelection
+clueEncoder :: SessionStateType -> VoxelSelection
 clueEncoder = undefined
 
 removeMarkerDecoder :: DecodedTool -> PlayerMove
 removeMarkerDecoder dTool = undefined
 
-removeMarkerEncoder :: InnerVoxelVersePlayerSession -> VoxelSelection
+removeMarkerEncoder :: SessionStateType -> VoxelSelection
 removeMarkerEncoder = undefined
 
 pushButtonLabel :: VoxelPropertyValue
@@ -127,7 +126,7 @@ moveDecoders = fromList
     , (removeMarkerLabel, removeMarkerDecoder)
     ]
 
-socketEncoders :: Map VoxelPropertyValue (InnerVoxelVersePlayerSession -> VoxelSelection)
+socketEncoders :: Map VoxelPropertyValue (SessionStateType -> VoxelSelection)
 socketEncoders = fromList
     [ (pushButtonLabel, pushButtonEncoder)
     , (moveJeepLabel, jeepEncoder)
@@ -135,9 +134,17 @@ socketEncoders = fromList
     , (removeMarkerLabel, removeMarkerEncoder)
     ]
 
-toPlayerMove :: ToolApplication -> InnerVoxelVersePlayerSession -> Either Text PlayerMove
-toPlayerMove tool session = toEitherMove mPlayerMove
-    where   mTool = decodeTool tool session
+toolLocations :: Map VoxelPropertyValue (CubeCoordinate Int)
+toolLocations = fromList
+    [ (pushButtonLabel, undefined)
+    , (moveJeepLabel, undefined)
+    , (playClueLabel, undefined)
+    , (removeMarkerLabel, undefined)
+    ]
+
+toPlayerMove :: ToolApplication -> VoxelVerseState -> Either Text PlayerMove
+toPlayerMove tool st = toEitherMove mPlayerMove
+    where   mTool = decodeTool tool st
             errorMsg = "Could not find toolName " <> show ((.toolName) <$> mTool) <> " in moveDecoders."
             mPlayerMove = do
                 t <- mTool
@@ -147,8 +154,8 @@ toPlayerMove tool session = toEitherMove mPlayerMove
             toEitherMove (Just m) = Right m
             toEitherMove _ = Left errorMsg
 
-decodeTool :: ToolApplication -> InnerVoxelVersePlayerSession -> Maybe DecodedTool
-decodeTool tool session = decodedTool appliedToolList
+decodeTool :: ToolApplication -> VoxelVerseState -> Maybe DecodedTool
+decodeTool tool st = decodedTool appliedToolList
     where   decodedTool [(loc, v)] = Just $ DecodedTool
                 { toolName = propertySetLookup "toolName" v
                 , tool = v
@@ -158,9 +165,9 @@ decodeTool tool session = decodedTool appliedToolList
             appliedToolAsSelection :: VoxelSelection
             appliedToolAsSelection = SparseSelection tool.toolLayer $ one tool.appliedTool
             appliedToolList = lookupStateVoxels (selectionLookupFn appliedToolAsSelection)
-                session.playerModel
+                st
             selectedSets = lookupStateVoxels (selectionLookupFn tool.appliedSelection)
-                session.playerModel
+                st
 
 onlySelectedTool :: Maybe DecodedTool -> Maybe (CubeCoordinate Int, Voxel)
 onlySelectedTool mTool = do
@@ -169,9 +176,9 @@ onlySelectedTool mTool = do
                 (f, rest) <- uncons tools
                 if null rest then Just f else Nothing
 
-isGameMove :: ToolApplication -> InnerVoxelVersePlayerSession -> Bool
-isGameMove tool session = not isMetaAction
-    where   mTool = decodeTool tool session
+isGameMove :: ToolApplication -> VoxelVerseState -> Bool
+isGameMove tool st = not isMetaAction
+    where   mTool = decodeTool tool st
             isCancelSelected (_, voxel) = TrueProperty == propertySetLookup "cancel" voxel
             isCancel = any isCancelSelected $ maybe [] (.selection) mTool
             selectionError = maybe True ((1 /=) . length . (.selection)) mTool
@@ -181,7 +188,7 @@ isGameMove tool session = not isMetaAction
 makeMoveNextGameState :: ToolApplication -> InnerVoxelVerseSession -> Either Text InnerVoxelVerseSession
 makeMoveNextGameState tool session = do
     playerSession <- getActivePlayerSession session
-    move <- toPlayerMove tool (snd playerSession)
+    move <- toPlayerMove tool (((.playerModel) . snd) playerSession)
     let gameState = session.vvContext.currentState
         (newGameState, censoredGameStates) = makeMove gameState move
         playerOptions playerId | playerId == gameState.activePlayer = enumerateActivePlayerOptions newGameState
@@ -201,9 +208,10 @@ makeMoveNextGameState tool session = do
     pure newSession
 
 toolLocation :: VoxelPropertyValue -> CubeCoordinate Int
-toolLocation = undefined
+toolLocation toolName = fromMaybe undefinedLocation $ Map.lookup toolName toolLocations
+    where undefinedLocation = mkCubeCoordinate 0 0
 
-pushButtonChoiceTool :: InnerVoxelVersePlayerSession -> ToolApplication
+pushButtonChoiceTool :: SessionStateType -> ToolApplication
 pushButtonChoiceTool session = ToolApplication 
     { toolLayer = 0
     , appliedTool = (toolLocation pushButtonLabel, NoVoxelSpecifier)
@@ -217,7 +225,7 @@ noChoiceTool = ToolApplication
     , appliedSelection = SparseSelection 0 mempty
     }
 
-selectedChoiceTool :: Maybe (CubeCoordinate Int, Voxel) -> InnerVoxelVersePlayerSession -> ToolApplication
+selectedChoiceTool :: Maybe (CubeCoordinate Int, Voxel) -> SessionStateType -> ToolApplication
 selectedChoiceTool Nothing session = pushButtonChoiceTool session
 selectedChoiceTool (Just (_, selected)) session = ToolApplication 
     { toolLayer = 0
@@ -227,34 +235,28 @@ selectedChoiceTool (Just (_, selected)) session = ToolApplication
             noSelection = SparseSelection 0 mempty
             encodeSelection = fromMaybe (const noSelection) $ Map.lookup selectedName socketEncoders
 
-nextChoiceTool :: ToolApplication -> InnerVoxelVersePlayerSession -> ToolApplication
-nextChoiceTool previous session 
-    | notToolPicked = pushButtonChoiceTool session
-    | otherwise = selectedChoiceTool selectedTool session
-    where   mTool = decodeTool previous session
+nextChoiceTool :: ToolApplication -> SessionStateType -> ToolApplication
+nextChoiceTool previous st
+    | notToolPicked = pushButtonChoiceTool st
+    | otherwise = selectedChoiceTool selectedTool st
+    where   mTool = decodeTool previous st.voxelVerseState
             isCancelSelected (_, voxel) = TrueProperty == propertySetLookup "cancel" voxel
             isCancel = any isCancelSelected $ maybe [] (.selection) mTool
             selectionError = maybe True ((1 /=) . length . (.selection)) mTool
             selectedTool = onlySelectedTool mTool
             notToolPicked = isCancel || isNothing selectedTool || selectionError
 
-updatePlayerInteractionState :: ToolApplication -> PlayerId -> InnerVoxelVersePlayerSession
-    -> Either Text InnerVoxelVersePlayerSession
-updatePlayerInteractionState tool playerId session
-    = Right $ session { playerInteractionState = newInteractionState }
-    where   newInteractionState = session.playerInteractionState { currentToolChoices = newChoices }
-            gameState = toGameState session.playerContext.currentState
+updatePlayerInteractionState :: ToolApplication -> VoxelVersePlayerContext -> SessionStateType
+    -> Either Text SessionStateType
+updatePlayerInteractionState tool ctx st
+    = Right $ st { voxelVerseInteractionState = newInteractionState }
+    where   playerId = st.voxelVerseState.thisPlayer
+            newInteractionState = st.voxelVerseInteractionState { currentToolChoices = newChoices }
+            gameState = toGameState ctx.currentState
             newChoices  | not isActive = noChoiceTool
-                        | isGameMove tool session = pushButtonChoiceTool session
-                        | otherwise = nextChoiceTool tool session
+                        | isGameMove tool st.voxelVerseState = pushButtonChoiceTool st
+                        | otherwise = nextChoiceTool tool st
             isActive = gameState.activePlayer == playerId
-
-updateInteractionStates :: ToolApplication -> InnerVoxelVerseSession -> Either Text InnerVoxelVerseSession
-updateInteractionStates tool session = do
-    let playerSessions = session.vvPlayerSessions
-        playerIds = map (.player.playerId) session.vvContext.currentState.players
-    updatedSessions <- zipWithM (updatePlayerInteractionState tool) playerIds playerSessions
-    pure $ session { vvPlayerSessions = updatedSessions} 
 
 getActivePlayerSession :: InnerVoxelVerseSession -> Either Text (PlayerId, InnerVoxelVersePlayerSession)
 getActivePlayerSession session = (playerId, ) <$> maybeToRight eMsg mInnerSession
@@ -264,16 +266,21 @@ getActivePlayerSession session = (playerId, ) <$> maybeToRight eMsg mInnerSessio
                 let sessions = zip session.vvPlayerSessions session.vvContext.currentState.players
                 fst . fst <$> uncons (filter ((playerId ==) . (.player.playerId) . snd) sessions)
 
-computeNextGameState :: InnerVoxelVerseSession -> ToolApplication -> Either Text InnerVoxelVerseSession
-computeNextGameState session tool = do
+computeNextGameState :: ToolApplication -> InnerVoxelVerseSession -> Either Text InnerVoxelVerseSession
+computeNextGameState tool session = do
     playerSession <- snd <$> getActivePlayerSession session
-    let     updated | isGameMove tool playerSession = makeMoveNextGameState tool session
+    let     updated | isGameMove tool playerSession.playerModel = makeMoveNextGameState tool session
                     | otherwise = Right session
     updated
 
 applyToolM :: ToolApplication -> SessionM ()
-applyToolM _toolApplication = do
-    lift (Left "applyToolM not implemented yet")
+applyToolM tool = do
+    -- lift (Left "delta computations not implemented yet")
+    sessionState <- get
+    ctx <- ask
+    newSessionState <- lift (updatePlayerInteractionState tool ctx sessionState)
+    put newSessionState
+
 
 createVoxelVerseView :: InnerVoxelVersePlayerSession -> VoxelVerseView
 createVoxelVerseView sess = undefined
