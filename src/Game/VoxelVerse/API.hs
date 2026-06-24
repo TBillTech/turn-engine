@@ -83,9 +83,9 @@ createNewGame players randomSeed = do
             , planningState = Nothing
             }
         , playerModel = initialVoxelVerseState player.playerId censoredState
-        , playerModelDelta = initialVoxelVerseDelta censoredState
-        , playerInteractionState = initialInteractionState censoredState
-        , playerProjectionState = initialProjectionState censoredState
+        , playerModelDelta = initialVoxelVerseDelta player.playerId censoredState
+        , playerInteractionState = initialInteractionState player.playerId censoredState
+        , playerProjectionState = initialProjectionState player.playerId censoredState
         }
 
 -- enumerateActivePlayerOptions is now _entailed_ in the enabled property of the Voxels,
@@ -114,11 +114,11 @@ initialVoxelVerseState playerId gameState =
         Core.RealEstateCensoredGameState gS ->
             RealEstate.initialVoxelVerseState playerId gS
 
-initialVoxelVerseDelta :: Core.CensoredGameState -> VoxelVerseDelta
-initialVoxelVerseDelta gameState =
+initialVoxelVerseDelta :: Primitives.PlayerId -> Core.CensoredGameState -> VoxelVerseDelta
+initialVoxelVerseDelta playerId gameState =
     case gameState of
         Core.CursedTreasureCensoredGameState gS ->
-            CursedTreasure.initialVoxelVerseDelta gS
+            CursedTreasure.initialVoxelVerseDelta playerId gS
         Core.FogOfBattleCensoredGameState gS ->
             FogOfBattle.initialVoxelVerseDelta gS
         Core.ArtOfWarCensoredGameState gS ->
@@ -126,11 +126,11 @@ initialVoxelVerseDelta gameState =
         Core.RealEstateCensoredGameState gS ->
             RealEstate.initialVoxelVerseDelta gS
 
-initialInteractionState :: Core.CensoredGameState -> VoxelVerseInteractionState
-initialInteractionState gameState =
+initialInteractionState :: Primitives.PlayerId -> Core.CensoredGameState -> VoxelVerseInteractionState
+initialInteractionState playerId gameState =
   case gameState of
-    Core.CursedTreasureCensoredGameState _ ->
-      CursedTreasureVoxelVerseInteractionState CursedTreasure.initialInteractionState
+    Core.CursedTreasureCensoredGameState gS ->
+      CursedTreasureVoxelVerseInteractionState $ CursedTreasure.initialInteractionState playerId gS
     Core.FogOfBattleCensoredGameState _ ->
       FogOfBattleVoxelVerseInteractionState FogOfBattle.initialInteractionState
     Core.ArtOfWarCensoredGameState _ ->
@@ -138,11 +138,11 @@ initialInteractionState gameState =
     Core.RealEstateCensoredGameState _ ->
       RealEstateVoxelVerseInteractionState RealEstate.initialInteractionState
 
-initialProjectionState :: Core.CensoredGameState -> VoxelVerseProjectionState
-initialProjectionState gameState =
+initialProjectionState :: Primitives.PlayerId -> Core.CensoredGameState -> VoxelVerseProjectionState
+initialProjectionState playerId gameState =
   case gameState of
-    Core.CursedTreasureCensoredGameState _ ->
-      CursedTreasureVoxelVerseProjectionState CursedTreasure.initialProjectionState
+    Core.CursedTreasureCensoredGameState gS ->
+      CursedTreasureVoxelVerseProjectionState $ CursedTreasure.initialProjectionState playerId gS
     Core.FogOfBattleCensoredGameState _ ->
       FogOfBattleVoxelVerseProjectionState FogOfBattle.initialProjectionState
     Core.ArtOfWarCensoredGameState _ ->

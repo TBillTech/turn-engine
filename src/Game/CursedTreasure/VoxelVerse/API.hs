@@ -57,14 +57,14 @@ import Data.Aeson (ToArgs)
 initialVoxelVerseState :: PlayerId -> CensoredGameState -> VoxelVerseState
 initialVoxelVerseState playerId gameState = undefined
 
-initialVoxelVerseDelta :: CensoredGameState -> VoxelVerseDelta
-initialVoxelVerseDelta gameState = undefined
+initialVoxelVerseDelta :: PlayerId -> CensoredGameState -> VoxelVerseDelta
+initialVoxelVerseDelta playerId gameState = mempty
 
-initialInteractionState :: InteractionState
-initialInteractionState = InteractionState { }
+initialInteractionState :: PlayerId -> CensoredGameState -> InteractionState
+initialInteractionState playerId gameState = undefined
 
-initialProjectionState :: ProjectionState
-initialProjectionState = ProjectionState
+initialProjectionState :: PlayerId -> CensoredGameState -> ProjectionState
+initialProjectionState playerId gameState = ProjectionState
 
 type VoxelVerseContext = Context GameState
 type VoxelVersePlayerContext = Context CensoredGameState
@@ -276,6 +276,9 @@ computeNextGameState tool session = do
 applyToolM :: ToolApplication -> SessionM ()
 applyToolM tool = do
     -- lift (Left "delta computations not implemented yet")
+    -- 1) Compose deltas
+    -- 2) If in post move mode (isGameMove), impose deltas
+    -- 3) Update interaction state, a.k.a. the current tool and sockets
     sessionState <- get
     ctx <- ask
     newSessionState <- lift (updatePlayerInteractionState tool ctx sessionState)
