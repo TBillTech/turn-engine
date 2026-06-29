@@ -51,8 +51,10 @@ import Game.CursedTreasure.VoxelVerse.Types
 import Game.VoxelVerse.Types
 import Game.Core.Primitives
 import Control.Monad.Trans.RWS.Strict (RWST, runRWST)
-import qualified Data.Map.Strict as Map (lookup)
+import qualified Data.Map.Strict as Map (lookup, fromList)
 import Data.Aeson (ToArgs)
+import System.Random.Stateful (globalStdGen)
+import GHC.Base (TrName(TrNameD))
 
 initialVoxelVerseState :: PlayerId -> CensoredGameState -> VoxelVerseState
 initialVoxelVerseState playerId gameState = undefined
@@ -81,6 +83,260 @@ data DecodedTool = DecodedTool
     , selection :: [(CubeCoordinate Int, Voxel)]
 }
 
+pushButtonLabel :: VoxelPropertyValue
+pushButtonLabel = TextProperty "pushButton"
+
+passTurnLabel :: VoxelPropertyValue
+passTurnLabel = TextProperty "passTurn"
+
+playClueLabel :: VoxelPropertyValue
+playClueLabel = TextProperty "playClue"
+
+moveJeepLabel :: VoxelPropertyValue
+moveJeepLabel = TextProperty "moveJeep"
+
+exchangeClueCardsLabel :: VoxelPropertyValue
+exchangeClueCardsLabel = TextProperty "exchangeClueCards"
+
+pickupAmuletLabel :: VoxelPropertyValue
+pickupAmuletLabel = TextProperty "pickupAmulet"
+
+incrMoveLabel :: VoxelPropertyValue
+incrMoveLabel = TextProperty "useAmuletIncrMove"
+
+removeMarkerLabel :: VoxelPropertyValue
+removeMarkerLabel = TextProperty "removeMarker"
+
+raiseTreasureLabel :: VoxelPropertyValue
+raiseTreasureLabel = TextProperty "raiseTreasure"
+
+treasurePassLabel :: VoxelPropertyValue
+treasurePassLabel = TextProperty "treasurePass"
+
+treasureTakeLabel :: VoxelPropertyValue
+treasureTakeLabel = TextProperty "treasureTake"
+
+treasureWardCurse :: VoxelPropertyValue
+treasureWardCurse = TextProperty "treasureWardCurse"
+
+treasureAcceptCurse :: VoxelPropertyValue
+treasureAcceptCurse = TextProperty "treasureAcceptCurse"
+
+toolNameLabel :: VoxelPropertyValue
+toolNameLabel = TextProperty "toolName"
+
+useAmuletLabel :: VoxelPropertyValue
+useAmuletLabel = TextProperty "useAmulet"
+
+raisingTreasureLabel :: VoxelPropertyValue
+raisingTreasureLabel = TextProperty "raisingTreasure"
+
+enabledLabel :: VoxelPropertyValue
+enabledLabel = TextProperty "enabled"
+
+cancelLabel :: VoxelPropertyValue
+cancelLabel = TextProperty "cancel"
+
+viewMoveNorthLabel :: VoxelPropertyValue
+viewMoveNorthLabel = TextProperty "viewMoveNorth"
+
+viewMoveEastLabel :: VoxelPropertyValue
+viewMoveEastLabel = TextProperty "viewMoveEast"
+
+viewMoveSouthLabel :: VoxelPropertyValue
+viewMoveSouthLabel = TextProperty "viewMoveSouth"
+
+viewMoveWestLabel :: VoxelPropertyValue
+viewMoveWestLabel = TextProperty "viewMoveWest"
+
+viewZoomInLabel :: VoxelPropertyValue
+viewZoomInLabel = TextProperty "viewZoomIn"
+
+viewZoomOutLabel :: VoxelPropertyValue
+viewZoomOutLabel = TextProperty "viewZoomOut"
+
+openMenuLabel :: VoxelPropertyValue
+openMenuLabel = TextProperty "openMenu"
+
+editTextLabel :: VoxelPropertyValue
+editTextLabel = TextProperty "editText"
+
+toolGlossary :: GlossaryList
+toolGlossary = 
+    [ (toolNameLabel
+        , GlossaryEntry { glossaryDescription = "Property indicating what user/move/action tool corresponds to the Voxel or selected tool."
+                        , glossaryRange = ListProperty [ pushButtonLabel
+                                                    , cancelLabel
+                                                    , passTurnLabel
+                                                    , playClueLabel
+                                                    , moveJeepLabel
+                                                    , exchangeClueCardsLabel
+                                                    , pickupAmuletLabel
+                                                    , incrMoveLabel
+                                                    , removeMarkerLabel
+                                                    , raiseTreasureLabel
+                                                    , treasurePassLabel
+                                                    , treasureTakeLabel
+                                                    , treasureWardCurse
+                                                    , treasureAcceptCurse
+                                                    , viewMoveNorthLabel
+                                                    , viewMoveEastLabel
+                                                    , viewMoveSouthLabel
+                                                    , viewMoveWestLabel
+                                                    , viewZoomInLabel
+                                                    , viewZoomOutLabel
+                                                    , openMenuLabel
+                                                    , editTextLabel
+                                        ]})
+    , (useAmuletLabel
+        , GlossaryEntry { glossaryDescription = "Whether the current tool will use up an Amulet"
+                        , glossaryRange = TrueProperty }
+        )
+    , (raisingTreasureLabel
+        , GlossaryEntry { glossaryDescription = "Property set during raising treasure mode"
+                        , glossaryRange = TrueProperty })
+    , (pushButtonLabel
+        , GlossaryEntry { glossaryDescription = "Name of tool in Push Button mode, allowing user to take immediate actions OR possibly to select another tool"
+                        , glossaryRange = pushButtonLabel})
+    , (playClueLabel
+        , GlossaryEntry { glossaryDescription = "Name of tool in Play clue mode, allowing user to play one of user's clues"
+                        , glossaryRange = playClueLabel})
+    , (moveJeepLabel
+        , GlossaryEntry { glossaryDescription = "Name of tool in Move jeep mode, allowing user to select a next jeep location"
+                        , glossaryRange = moveJeepLabel})
+    , (removeMarkerLabel
+        , GlossaryEntry { glossaryDescription = "Name of tool in Remove Marker mode, allowing user to select a marker to remove"
+                        , glossaryRange = removeMarkerLabel})
+    , (enabledLabel
+        , GlossaryEntry { glossaryDescription = "All valid tool targets have this property set to true."
+                        , glossaryRange = TrueProperty})
+    ]
+
+oceanLabel :: VoxelPropertyValue
+oceanLabel = TextProperty "ocean"
+
+riverLabel :: VoxelPropertyValue
+riverLabel = TextProperty "river"
+
+lagoonLabel :: VoxelPropertyValue
+lagoonLabel = TextProperty "lagoon"
+
+meadowLabel :: VoxelPropertyValue
+meadowLabel = TextProperty "meadow"
+
+jungleLabel :: VoxelPropertyValue
+jungleLabel = TextProperty "jungle"
+
+mountainLabel :: VoxelPropertyValue
+mountainLabel = TextProperty "mountain"
+
+beachLabel :: VoxelPropertyValue
+beachLabel = TextProperty "beach"
+
+terrainTypeLabel :: VoxelPropertyValue
+terrainTypeLabel = TextProperty "terrainType"
+
+jeepTokensLabel :: VoxelPropertyValue
+jeepTokensLabel = TextProperty "jeepTokens"
+
+markerTokensLabel :: VoxelPropertyValue
+markerTokensLabel = TextProperty "markerTokens"
+
+amuletTokenLabel :: VoxelPropertyValue
+amuletTokenLabel = TextProperty "amuletToken"
+
+hutTokenLabel :: VoxelPropertyValue
+hutTokenLabel = TextProperty "hutToken"
+
+statueTokenLabel :: VoxelPropertyValue
+statueTokenLabel = TextProperty "statueToken"
+
+palmTokenLabel :: VoxelPropertyValue
+palmTokenLabel = TextProperty "palmToken"
+
+largestFeatureLabel :: VoxelPropertyValue
+largestFeatureLabel = TextProperty "isLargestFeature"
+
+mapGlossary :: GlossaryList
+mapGlossary =
+    [ (terrainTypeLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying the terrain type of the voxel"
+                        , glossaryRange = ListProperty [ oceanLabel
+                                                       , riverLabel
+                                                       , lagoonLabel
+                                                       , meadowLabel
+                                                       , jungleLabel
+                                                       , mountainLabel
+                                                       , beachLabel]})
+    , (jeepTokensLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying list of Jeep Token colors on the voxel"
+                        , glossaryRange = ListProperty $ map (TextProperty . show) allPlayerColors})
+    , (markerTokensLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying list of Marker Token colors on the voxel"
+                        , glossaryRange = ListProperty $ map (TextProperty . show) allClueColors})
+    , (amuletTokenLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying that an amulet is on the voxel"
+                        , glossaryRange = TrueProperty})
+    , (hutTokenLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying that a hut is on the voxel"
+                        , glossaryRange = TrueProperty})
+    , (statueTokenLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying that a statue is on the voxel"
+                        , glossaryRange = TrueProperty})
+    , (palmTokenLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying that a plam tree is on the voxel"
+                        , glossaryRange = TrueProperty})
+    , (largestFeatureLabel
+        , GlossaryEntry { glossaryDescription = "Property indicating that this voxel is part of a feature formation that is maximally sized per this feature type"
+                        , glossaryRange = TrueProperty})
+    ]
+
+voxelGroupLabel = TextProperty "buttonGroup"
+
+labeledGroupRange = ListProperty [TextProperty "some label"
+                                 ,ListProperty [IntProperty 0, IntProperty 9999]]
+
+groupTextSizeLabel = TextProperty "groupTextSize"
+
+groupTextLabel = TextProperty "groupText"
+
+isEditableLabel = TextProperty "isEditable"
+
+isClickableLabel = TextProperty "isClickable"
+
+groupBitmapNameLabel = TextProperty "groupBitmapName"
+
+groupBitmapStateLabel = TextProperty "groupBitmapState"
+
+hudGlossary :: GlossaryList
+hudGlossary = 
+    [ (voxelGroupLabel
+        , GlossaryEntry { glossaryDescription = "Property indicating this voxel is part of the identified button group"
+                        , glossaryRange = labeledGroupRange})
+    , (groupTextSizeLabel
+        , GlossaryEntry { glossaryDescription = "Property specifying the number of glyphs per voxel for text on a group"
+                        , glossaryRange = ListProperty [IntProperty 1, IntProperty 3, IntProperty 12]})
+    , (groupTextLabel
+        , GlossaryEntry { glossaryDescription = "Property containing the text of the group"
+                        , glossaryRange = TextProperty "any text"})
+    , (groupBitmapNameLabel 
+        , GlossaryEntry { glossaryDescription = "Property containing the name of the bitmap for the voxel group"
+                        , glossaryRange = TextProperty "a bitmap name"})
+    , (groupBitmapStateLabel
+        , GlossaryEntry { glossaryDescription = "Property containing a text string for the bitmap display state for the group"
+                        , glossaryRange = TextProperty "a state name"})
+    , (isEditableLabel
+        , GlossaryEntry { glossaryDescription = "Property is true if the group is editable"
+                        , glossaryRange = TrueProperty})
+    , (isClickableLabel
+        , GlossaryEntry { glossaryDescription = "Property is true if the group is clickable/pressable"
+                        , glossaryRange = TrueProperty})
+    ]
+
+glossary :: Glossary
+glossary = Glossary $ Map.fromList $ map (first toText) 
+    $ concat [toolGlossary, mapGlossary, hudGlossary]
+
 pushButtonDecoder :: DecodedTool -> PlayerMove
 pushButtonDecoder dTool = undefined
 
@@ -105,18 +361,6 @@ removeMarkerDecoder dTool = undefined
 
 removeMarkerEncoder :: SessionStateType -> VoxelSelection
 removeMarkerEncoder = undefined
-
-pushButtonLabel :: VoxelPropertyValue
-pushButtonLabel = TextProperty "pushButton"
-
-moveJeepLabel :: VoxelPropertyValue
-moveJeepLabel = TextProperty "moveJeep"
-
-playClueLabel :: VoxelPropertyValue
-playClueLabel = TextProperty "playClue"
-
-removeMarkerLabel :: VoxelPropertyValue
-removeMarkerLabel = TextProperty "removeMarker"
 
 moveDecoders :: Map VoxelPropertyValue (DecodedTool -> PlayerMove)
 moveDecoders = fromList

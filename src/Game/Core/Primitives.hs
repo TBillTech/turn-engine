@@ -46,11 +46,15 @@ module Game.Core.Primitives
     , VoxelSpecifier (..)
     , VoxelSelection (..)
     , ToolApplication (..)
+    , GlossaryList
+    , GlossaryEntry (..)
+    , Glossary (..)
     )
 where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=), object, withObject, withScientific)
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as Text
 import System.Random (StdGen, mkStdGen)
 
 data PlayerDescription = PlayerDescription
@@ -332,7 +336,19 @@ data VoxelPropertyValue = NullProperty
     | TextProperty Text
     | ListProperty [VoxelPropertyValue]
     | KeyValueProperty PropertySet
-    deriving (Show, Eq, Generic)
+    deriving (FromJSON, ToJSON, Show, Eq, Generic)
+
+-- Currently, ToText instance is intended to support the Glossary, so there is no FromText
+instance ToText VoxelPropertyValue where
+    toText NullProperty = "Null"
+    toText TrueProperty = "True"
+    toText (IntProperty i) = show i
+    toText (DoubleProperty d) = show d
+    toText (TextProperty t) = t
+    toText (ListProperty l) = "[" <> Text.intercalate ", " (map toText l) <> "]"
+    toText (KeyValueProperty (PropertySet m)) = Text.intercalate ", " $ map pairToText (Map.toList m)
+        where pairToText (label, v) = "(" <> label <> ", " <> toText v <> ")"
+
 
 instance Ord VoxelPropertyValue where
     NullProperty `compare` NullProperty = False `compare` False
@@ -358,7 +374,8 @@ instance Ord VoxelPropertyValue where
 
 -- Then the key-value labeled set of properties is nothing but a Text to VoxelPropertyValue map:
 newtype PropertySet = PropertySet (Map Text VoxelPropertyValue)
-    deriving (Ord, Show, Eq, Generic)
+    deriving stock (Ord, Show, Eq, Generic)
+    deriving newtype (FromJSON, ToJSON)
 
 propertySetUnion :: PropertySet -> PropertySet -> PropertySet
 propertySetUnion (PropertySet left) (PropertySet right) = PropertySet (left <> right)
@@ -438,8 +455,8 @@ newtype PropertyGroups = PropertyGroups (Map PropertyGroupName PropertySet)
 -- For the user to actually apply a tool though, we need to define a selection of Voxels. There are 
 -- arguments to be made for both sparse selections AND block selections, so support both. Note that
 -- the (Int, Int) payload is intended to carry (top, bottom) range for verticality.
-data VoxelSpecifier = NoVoxelSpecifier 
-    | VerticalVoxelSpecifier Int Int 
+data VoxelSpecifier = NoVoxelSpecifier
+    | VerticalVoxelSpecifier Int Int
     | PropertyVoxelSpecifier Text
     | IndexVoxelSpecifier Int
     | ANDVoxelSpecifier VoxelSpecifier VoxelSpecifier
@@ -458,3 +475,18 @@ data ToolApplication = ToolApplication {
     appliedSelection :: VoxelSelection
 } deriving (Show, Eq, Generic)
 
+data GlossaryEntry = GlossaryEntry
+    { glossaryDescription :: Text
+    , glossaryRange :: VoxelPropertyValue
+} deriving (FromJSON, ToJSON, Show, Eq, Generic)
+
+instance ToText GlossaryEntry where
+    toText e = "{description: " <> e.glossaryDescription 
+        <> ", range: " 
+        <> toText e.glossaryRange <> "}" 
+
+type GlossaryList = [(VoxelPropertyValue, GlossaryEntry)]
+
+newtype Glossary = Glossary (Map Text GlossaryEntry)
+    deriving stock (Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
